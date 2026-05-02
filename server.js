@@ -450,7 +450,7 @@ io.on('connection', (socket) => {
     const { roomCode, playerId } = socket.data || {};
     const room = rooms[roomCode];
     if (room && room.host === playerId && !room.started) {
-      room.settings.turnDuration = Math.max(5, Math.min(30, settings.turnDuration));
+      room.settings.turnDuration = Math.max(5, Math.min(60, settings.turnDuration));
       room.settings.type = settings.type;
       room.settings.preset = settings.preset;
       room.settings.roster = settings.roster;
@@ -775,7 +775,40 @@ io.on('connection', (socket) => {
     if (p) addLog(room, `🔌 ${p.name} est hors ligne.`);
     broadcast(room);
   });
+
+
+  socket.on('room:leave', () => {
+  const { roomCode, playerId } = socket.data || {};
+  const room = rooms[roomCode];
+  if (!room) return;
+
+  // retirer joueur
+  room.players = room.players.filter(p => p.id !== playerId);
+
+  // si host quitte → nouveau host
+  if (room.host === playerId && room.players.length > 0) {
+    room.host = room.players[0].id;
+  }
+
+  // si plus personne → delete room
+  if (room.players.length === 0) {
+    delete rooms[roomCode];
+    return;
+  }
+
+  // si partie en cours → éliminer joueur
+  const player = playerById(room, playerId);
+  if (player) {
+    player.eliminated = true;
+  }
+
+  broadcast(room);
 });
+});
+
+
+
+
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Serveur Complots en écoute sur le port ${PORT}`));
