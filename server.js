@@ -42,7 +42,7 @@ function broadcast(room) {
 }
 
 function buildView(room, playerId) {
-return {
+  return {
     roomCode: room.code,
     host: room.host,
     phase: room.phase,
@@ -423,13 +423,25 @@ io.on('connection', (socket) => {
     nextTurn(room);
   });
 
+  socket.on('room:rejoin', ({ roomCode: rc, playerId }) => {
+    const room = rooms[rc];
+    if (!room) return socket.emit('error', 'Salle introuvable ou expirée.');
+    const p = playerById(room, playerId);
+    if (!p) return socket.emit('error', 'Joueur introuvable dans cette salle.');
+    p.socketId = socket.id;
+    socket.join(rc);
+    socket.data = { roomCode: rc, playerId };
+    socket.emit('room:joined', { roomCode: rc, playerId });
+    addLog(room, `${p.name} s'est reconnecté.`);
+    broadcast(room);
+  });
+
   socket.on('disconnect', () => {
     const { roomCode, playerId } = socket.data || {};
     if (!roomCode || !rooms[roomCode]) return;
     const room = rooms[roomCode];
     const p = playerById(room, playerId);
     if (p) addLog(room, `${p.name} s'est déconnecté.`);
-    // Keep room alive; player can reconnect
   });
 });
 
