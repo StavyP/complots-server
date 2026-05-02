@@ -42,8 +42,9 @@ function broadcast(room) {
 }
 
 function buildView(room, playerId) {
-  return {
+return {
     roomCode: room.code,
+    host: room.host,
     phase: room.phase,
     currentPlayerId: room.currentPlayerId,
     treasury: room.treasury,
