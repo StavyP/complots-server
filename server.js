@@ -755,7 +755,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('room:rejoin', ({ roomCode: rc, playerId }) => {
+socket.on('room:rejoin', ({ roomCode: rc, playerId }) => {
     const room = rooms[rc];
     if (!room) return socket.emit('error', 'Salle introuvable ou expirée.');
     const p = playerById(room, playerId);
@@ -776,44 +776,39 @@ io.on('connection', (socket) => {
     broadcast(room);
   });
 
-
   socket.on('room:leave', () => {
-  const { roomCode, playerId } = socket.data || {};
-  const room = rooms[roomCode];
-  if (!room) return;
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room) return;
 
-  // retirer joueur
-  room.players = room.players.filter(p => p.id !== playerId);
+    // retirer joueur
+    room.players = room.players.filter(p => p.id !== playerId);
 
-  // si host quitte → nouveau host
-  if (room.host === playerId && room.players.length > 0) {
-    room.host = room.players[0].id;
-  }
+    // si host quitte → nouveau host
+    if (room.host === playerId && room.players.length > 0) {
+      room.host = room.players[0].id;
+    }
 
-  // si plus personne → delete room
-  if (room.players.length === 0) {
-    delete rooms[roomCode];
-    return;
-  }
+    // si plus personne → delete room
+    if (room.players.length === 0) {
+      delete rooms[roomCode];
+      return;
+    }
 
-  // Si la partie a commencé, on élimine le joueur
-  const p = playerById(room, playerId);
-  if (p && room.started) {
-    p.eliminated = true;
-    addLog(room, `💀 ${p.name} a abandonné la partie.`);
-    checkWin(room);
-  } else if (p) {
-    addLog(room, `🚪 ${p.name} a quitté la salle.`);
-  }
+    // Si la partie a commencé, on élimine le joueur
+    const p = playerById(room, playerId);
+    if (p && room.started) {
+      p.eliminated = true;
+      addLog(room, `💀 ${p.name} a abandonné la partie.`);
+      checkWin(room);
+    } else if (p) {
+      addLog(room, `🚪 ${p.name} a quitté la salle.`);
+    }
 
-  broadcast(room);
-});
-});
-});
-
-
-
-
+    broadcast(room);
+  });
+}); // <-- Une seule accolade fermante pour io.on('connection')
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Serveur Complots en écoute sur le port ${PORT}`));
+
