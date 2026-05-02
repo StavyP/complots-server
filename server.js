@@ -796,13 +796,18 @@ io.on('connection', (socket) => {
     return;
   }
 
-  // si partie en cours → éliminer joueur
-  const player = playerById(room, playerId);
-  if (player) {
-    player.eliminated = true;
+  // Si la partie a commencé, on élimine le joueur
+  const p = playerById(room, playerId);
+  if (p && room.started) {
+    p.eliminated = true;
+    addLog(room, `💀 ${p.name} a abandonné la partie.`);
+    checkWin(room);
+  } else if (p) {
+    addLog(room, `🚪 ${p.name} a quitté la salle.`);
   }
 
   broadcast(room);
+});
 });
 });
 
