@@ -464,6 +464,9 @@ io.on('connection', (socket) => {
     if (!room || room.host !== playerId) return;
     if (room.players.length < 3) return socket.emit('error', 'Il faut au moins 3 joueurs.');
 
+    // Mélanger l'ordre des joueurs aléatoirement à chaque partie
+    shuffle(room.players);
+
     room.deck = buildDeck(room.players.length, room.settings.roster);
     room.treasury = 50;
     room.players.forEach(p => {
@@ -501,7 +504,6 @@ io.on('connection', (socket) => {
       targetId: targetId || null,
       blockableBy: blockableChars,
       contestable,
-      targetOnly: targetId ? true : false,  // true si seul la cible peut réagir
     };
 
     const uncontestable = ['income', 'coup'];
@@ -525,10 +527,6 @@ io.on('connection', (socket) => {
     const { roomCode, playerId } = socket.data || {};
     const room = rooms[roomCode];
     if (!room || (room.phase !== 'challenge' && room.phase !== 'block_challenge')) return;
-    
-    // Vérifier que seul la cible (ou autres joueurs si pas de cible) peut passer en phase challenge
-    const pa = room.pendingAction;
-    if (room.phase === 'challenge' && pa && pa.targetOnly && pa.targetId !== playerId && pa.actorId !== playerId) return;
 
     if (!room.passedPlayers.includes(playerId)) {
       room.passedPlayers.push(playerId);
@@ -553,10 +551,6 @@ io.on('connection', (socket) => {
     const { roomCode, playerId } = socket.data || {};
     const room = rooms[roomCode];
     if (!room || room.phase !== 'challenge') return;
-    
-    // Vérifier que seul la cible (ou autres joueurs si pas de cible) peut contester
-    const pa = room.pendingAction;
-    if (pa && pa.targetOnly && pa.targetId !== playerId) return;
 
     clearRoomTimer(room);
     const challenger = playerById(room, playerId);
@@ -585,10 +579,6 @@ io.on('connection', (socket) => {
     const { roomCode, playerId } = socket.data || {};
     const room = rooms[roomCode];
     if (!room || room.phase !== 'challenge') return;
-    
-    // Vérifier que seul la cible (ou autres joueurs si pas de cible) peut bloquer
-    const pa = room.pendingAction;
-    if (pa && pa.targetOnly && pa.targetId !== playerId) return;
 
     clearRoomTimer(room);
     const blocker = playerById(room, playerId);
@@ -768,7 +758,43 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('room:rejoin', ({ roomCode: rc, playerId }) => {
+  socket.on('game:replay', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.host !== playerId) return;
+
+    // Mélanger l'ordre des joueurs aléatoirement pour la revanche
+    shuffle(room.players);
+
+    // Reset complet de l'état de la partie
+    room.started = false;
+    room.phase = 'lobby';
+    room.deck = [];
+    room.treasury = 0;
+    room.currentPlayerId = null;
+    room.log = [];
+    room.pendingAction = null;
+    room.challengeCtx = null;
+    room.passedPlayers = [];
+    room.pickCtx = null;
+    room.exchangeCtx = null;
+    room.spyCtx = null;
+    room.blackmailCtx = null;
+    room.croqueMortCtx = null;
+    room.winnerId = null;
+    if (room.timer) { clearTimeout(room.timer); room.timer = null; }
+    room.timerEnd = null;
+
+    // Reset de chaque joueur
+    room.players.forEach(p => {
+      p.hand = [];
+      p.revealed = [];
+      p.coins = 0;
+      p.eliminated = false;
+    });
+
+    broadcast(room);
+  });
     const room = rooms[rc];
     if (!room) return socket.emit('error', 'Salle introuvable ou expirée.');
     const p = playerById(room, playerId);
@@ -795,48 +821,28 @@ io.on('connection', (socket) => {
   const room = rooms[roomCode];
   if (!room) return;
 
-  const player = playerById(room, playerId);
-  const isGameInProgress = room.phase && room.phase !== 'lobby';
-  const wasCurrentPlayer = room.currentPlayerId === playerId;
+  // retirer joueur
+  room.players = room.players.filter(p => p.id !== playerId);
 
-  // Si partie en cours → éliminer le joueur au lieu de le retirer
-  if (isGameInProgress && player) {
-    if (!player.eliminated) {
-      player.eliminated = true;
-      addLog(room, `❌ ${player.name} a abandonné.`);
-    }
-    
-    // Si c'était le joueur actuel → passer au suivant
-    if (wasCurrentPlayer) {
-      if (!checkWin(room)) {
-        nextTurn(room);
-      }
-    } else {
-      broadcast(room);
-    }
-  } else {
-    // Si en lobby → retirer simplement le joueur
-    room.players = room.players.filter(p => p.id !== playerId);
-
-    // si host quitte → nouveau host
-    if (room.host === playerId && room.players.length > 0) {
-      room.host = room.players[0].id;
-    }
-
-    // si plus personne → delete room
-    if (room.players.length === 0) {
-      delete rooms[roomCode];
-      return;
-    }
-
-    broadcast(room);
+  // si host quitte → nouveau host
+  if (room.host === playerId && room.players.length > 0) {
+    room.host = room.players[0].id;
   }
+
+  // si plus personne → delete room
+  if (room.players.length === 0) {
+    delete rooms[roomCode];
+    return;
+  }
+
+  // si partie en cours → éliminer joueur
+  const player = playerById(room, playerId);
+  if (player) {
+    player.eliminated = true;
+  }
+
+  broadcast(room);
 });
-});
-
-
-
-
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Serveur Complots en écoute sur le port ${PORT}`));
