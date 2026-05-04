@@ -12,7 +12,7 @@ const rooms = {};
 // Dictionnaire complet des personnages
 const ALL_CHARACTERS = {
   // Complots 1
-  'Duchesse':       { icon: '♛', type: 'complots2', short: 'Taxes · Bloque aide étrangère' },
+  'Duc':            { icon: '♛', type: 'classic',   short: 'Taxes · Bloque aide étrangère' },
   'Assassin':       { icon: '☽', type: 'classic',   short: 'Assassine pour 3 pièces' },
   'Comtesse':       { icon: '❦', type: 'classic',   short: 'Bloque l\'Assassin/Bourreau' },
   'Capitaine':      { icon: '⚓', type: 'classic',   short: 'Vole 2 pièces · Bloque Vol' },
@@ -28,11 +28,12 @@ const ALL_CHARACTERS = {
   'Maître Chanteur':{ icon: '📜', type: 'complots2', short: 'Force la cible à payer 3 ou mourir' },
   'Croque Mort':    { icon: '⚰️', type: 'complots2', short: 'Prend l\'or du mort · Bloque assassin' },
   'Sorcière':       { icon: '🔮', type: 'complots2', short: 'PASSIF : reçoit 5 pièces quand révélée' },
+  'Duchesse':       { icon: '♛', type: 'complots2', short: 'Taxes · Bloque aide étrangère' },
 };
 
 // Personnages valides par action (pour les contestations)
 const ACTION_VALID_CHARS = {
-  'tax':        ['Duchesse'],
+  'tax':        ['Duc', 'Duchesse'],
   'steal':      ['Capitaine', 'Justicier'],
   'assassinate':['Assassin', 'Bourreau'],
   'exchange':   ['Ambassadeur', 'Inquisiteur'],
@@ -45,7 +46,7 @@ const ACTION_VALID_CHARS = {
 
 // Actions pouvant être bloquées et par quel(s) personnage(s)
 const BLOCKABLE_BY = {
-  'foreign_aid': ['Duchesse', 'Illusionniste'],
+  'foreign_aid': ['Duc', 'Duchesse', 'Illusionniste'],
   'steal':       ['Capitaine', 'Ambassadeur', 'Inquisiteur', 'Justicier'],
   'assassinate': ['Comtesse', 'Croque Mort'],
   'spy':         [],
@@ -112,7 +113,12 @@ function buildView(room, playerId) {
     // Maître Chanteur : partagé (la cible doit pouvoir répondre)
     blackmailCtx: room.blackmailCtx || null,
     // Croque Mort : partagé pour la fenêtre de réclamation
-    croqueMortCtx: room.croqueMortCtx || null,
+    croqueMortCtx: room.croqueMortCtx ? {
+      deceasedName: room.croqueMortCtx.deceasedName,
+      coins: room.croqueMortCtx.coins,
+      claimerId: room.croqueMortCtx.claimerId || null,
+      claimerName: room.croqueMortCtx.claimerName || null,
+    } : null,
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
@@ -404,7 +410,7 @@ io.on('connection', (socket) => {
         turnDuration: 10,
         type: 'classic',
         preset: '1',
-        roster: ['Duchesse', 'Assassin', 'Comtesse', 'Capitaine', 'Ambassadeur']
+        roster: ['Duc', 'Assassin', 'Comtesse', 'Capitaine', 'Ambassadeur']
       },
       timerDuration: 10000,
       players: [{ id: playerId, name, socketId: socket.id, hand: [], revealed: [], coins: 0, eliminated: false }],
@@ -497,12 +503,17 @@ io.on('connection', (socket) => {
     const blockableChars = (BLOCKABLE_BY[actionId] || []).filter(c => room.settings.roster.includes(c));
     const contestable = !NON_CONTESTABLE.includes(actionId);
 
+    // Actions ciblées : seule la cible peut bloquer
+    const targetOnlyActions = ['steal', 'assassinate', 'spy', 'tithe', 'blackmail'];
+    const blockTargetOnly = targetOnlyActions.includes(actionId) && !!targetId;
+
     room.pendingAction = {
       id: actionId,
       actorId: playerId,
       targetId: targetId || null,
       blockableBy: blockableChars,
       contestable,
+      blockTargetOnly,
     };
 
     const uncontestable = ['income', 'coup'];
@@ -511,7 +522,18 @@ io.on('connection', (socket) => {
     }
 
     room.phase = 'challenge';
-    room.passedPlayers = [playerId];
+    // L'acteur passe automatiquement ; pour les actions ciblées, les non-cibles auto-passent aussi (ils ne peuvent pas bloquer)
+    const autoPass = [playerId];
+    if (blockTargetOnly) {
+      // Les joueurs qui ne sont ni acteur ni cible ne peuvent pas bloquer -> auto-pass pour le compte de passe
+      // Ils peuvent toujours contester côté client, mais on les comptabilise deja comme passes pour le blocage
+      alivePlayers(room).forEach(p => {
+        if (p.id !== playerId && p.id !== (targetId || null) && !autoPass.includes(p.id)) {
+          autoPass.push(p.id);
+        }
+      });
+    }
+    room.passedPlayers = autoPass;
     addLog(room, `⚡ ${actor.name} déclare : ${actionId}${target ? ' → ' + target.name : ''}`);
 
     const duration = room.settings.turnDuration * 1000;
@@ -566,7 +588,9 @@ io.on('connection', (socket) => {
       actor.hand.splice(idx, 1);
       room.deck.push(validChar);
       shuffle(room.deck);
-      actor.hand.push(room.deck.pop());
+      const newCard1 = room.deck.pop();
+      actor.hand.push(newCard1);
+      addLog(room, `\U0001f0cf ${actor.name} pioche une nouvelle carte apr\u00e8s avoir prouv\u00e9 sa carte.`);
       loseCard(room, challenger.id, undefined, () => resolveAction(room));
     } else {
       addLog(room, `🚨 MENTEUR ! ${challenger.name} démasque ${actor.name}. Action annulée.`);
@@ -624,7 +648,9 @@ io.on('connection', (socket) => {
       blocker.hand.splice(idx, 1);
       room.deck.push(blockChar);
       shuffle(room.deck);
-      blocker.hand.push(room.deck.pop());
+      const newCard2 = room.deck.pop();
+      blocker.hand.push(newCard2);
+      addLog(room, `\U0001f0cf ${blocker.name} pioche une nouvelle carte apr\u00e8s avoir prouv\u00e9 sa carte.`);
       room.pendingAction = null; room.challengeCtx = null;
       loseCard(room, actor.id, undefined, () => { if (!checkWin(room)) nextTurn(room); });
     } else {
@@ -712,27 +738,68 @@ io.on('connection', (socket) => {
     const { roomCode, playerId } = socket.data || {};
     const room = rooms[roomCode];
     if (!room || room.phase !== 'croque_mort' || !room.croqueMortCtx) return;
+    if (room.croqueMortCtx.claimerId) return; // quelqu'un a deja reclame
 
     const claimer = playerById(room, playerId);
     const ctx = room.croqueMortCtx;
 
-    // Vérifier si le réclamant a vraiment le Croque Mort
-    if (claimer.hand.includes('Croque Mort')) {
+    // Enregistrer le reclamant et attendre la reponse des autres
+    ctx.claimerId = playerId;
+    ctx.claimerName = claimer.name;
+    ctx.contestPassedPlayers = [];
+    // Recharger le timer pour la phase de contestation
+    clearRoomTimer(room);
+    const duration = Math.min(room.settings.turnDuration * 1000, 15000);
+    room.timerDuration = duration;
+    room.timerEnd = Date.now() + duration;
+    room.timer = setTimeout(() => {
+      // Personne n'a conteste : le reclamant reussit
       clearRoomTimer(room);
-      claimer.coins += ctx.coins;
-      addLog(room, `⚰️ ${claimer.name} (Croque Mort) récupère ${ctx.coins} pièce(s) de ${ctx.deceasedName}.`);
-      const savedCb = ctx.cb;
+      const c = room.croqueMortCtx;
+      if (!c) return;
+      const claimerP = playerById(room, c.claimerId);
+      if (claimerP && claimerP.hand.includes('Croque Mort')) {
+        claimerP.coins += c.coins;
+        addLog(room, `\u26b0\ufe0f ${claimerP.name} (Croque Mort) r\u00e9cup\u00e8re ${c.coins} pi\u00e8ce(s) de ${c.deceasedName}.`);
+      } else {
+        // Bluff non conteste : il prend quand meme (personne n'a verifie)
+        if (claimerP) { claimerP.coins += c.coins; }
+        addLog(room, `\u26b0\ufe0f ${claimerP?.name} r\u00e9clame l'h\u00e9ritage sans contestation (+${c.coins} pi\u00e8ces).`);
+      }
+      const savedCb = c.cb;
       room.croqueMortCtx = null;
       if (savedCb) savedCb();
-    } else {
-      // Bluff — perd une carte
-      addLog(room, `🚨 ${claimer.name} n'a pas le Croque Mort ! Il est démasqué.`);
-      clearRoomTimer(room);
-      room.treasury += ctx.coins; // pièces au trésor
-      addLog(room, `⚰️ L'héritage de ${ctx.deceasedName} retourne au trésor.`);
+    }, duration);
+    addLog(room, `\u26b0\ufe0f ${claimer.name} r\u00e9clame l'h\u00e9ritage du Croque Mort !`);
+    broadcast(room);
+  });
+
+  socket.on('croquemort:contest', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'croque_mort' || !room.croqueMortCtx?.claimerId) return;
+    if (playerId === room.croqueMortCtx.claimerId) return; // ne peut pas se contester soi-meme
+
+    clearRoomTimer(room);
+    const ctx = room.croqueMortCtx;
+    const claimer = playerById(room, ctx.claimerId);
+
+    if (claimer.hand.includes('Croque Mort')) {
+      // Le reclamant avait vraiment le Croque Mort : le contestataire perd une carte
+      addLog(room, `\u274c ${playerById(room,playerId).name} conteste \u00e0 tort ! ${claimer.name} avait bien le Croque Mort.`);
+      claimer.coins += ctx.coins;
+      addLog(room, `\u26b0\ufe0f ${claimer.name} r\u00e9cup\u00e8re ${ctx.coins} pi\u00e8ce(s).`);
       const savedCb = ctx.cb;
       room.croqueMortCtx = null;
       loseCard(room, playerId, undefined, () => { if (savedCb) savedCb(); });
+    } else {
+      // Bluff demasque : le reclamant perd une carte, les pieces au tresor
+      addLog(room, `\ud83d\udea8 MENTEUR ! ${playerById(room,playerId).name} d\u00e9masque ${claimer.name} ! Pas de Croque Mort.`);
+      room.treasury += ctx.coins;
+      addLog(room, `\u26b0\ufe0f L'h\u00e9ritage de ${ctx.deceasedName} retourne au tr\u00e9sor.`);
+      const savedCb = ctx.cb;
+      room.croqueMortCtx = null;
+      loseCard(room, ctx.claimerId, undefined, () => { if (savedCb) savedCb(); });
     }
   });
 
@@ -822,27 +889,45 @@ socket.on('game:replay', () => {
     const room = rooms[roomCode];
     if (!room) return;
 
-    // retirer joueur
-    room.players = room.players.filter(p => p.id !== playerId);
+    const wasHost = room.host === playerId;
 
-    // si host quitte → nouveau host
-    if (room.host === playerId && room.players.length > 0) {
-      room.host = room.players[0].id;
+    if (room.started) {
+      // En partie : eliminer le joueur et gerer le tour
+      const player = playerById(room, playerId);
+      if (player && !player.eliminated) {
+        player.eliminated = true;
+        addLog(room, `🏳 ${player.name} abandonne la partie.`);
+        if (room.currentPlayerId === playerId) {
+          clearRoomTimer(room);
+          room.pendingAction = null; room.challengeCtx = null;
+          room.pickCtx = null; room.exchangeCtx = null;
+          room.spyCtx = null; room.blackmailCtx = null;
+          room.croqueMortCtx = null; room.passedPlayers = [];
+          if (!checkWin(room)) nextTurn(room);
+          return;
+        }
+        // Si tous les vivants restants ont passe, resoudre
+        if (room.phase === 'challenge' || room.phase === 'block_challenge') {
+          const alive = alivePlayers(room);
+          const passedAlive = room.passedPlayers.filter(id => alive.find(p => p.id === id));
+          if (passedAlive.length >= alive.length) {
+            if (room.phase === 'challenge') { resolveAction(room); return; }
+            else { clearRoomTimer(room); room.pendingAction = null; room.challengeCtx = null; nextTurn(room); return; }
+          }
+        }
+      }
+      if (wasHost) {
+        const stillAlive = room.players.find(p => !p.eliminated);
+        if (stillAlive) room.host = stillAlive.id;
+      }
+      if (!checkWin(room)) broadcast(room);
+    } else {
+      // En lobby : retirer completement
+      room.players = room.players.filter(p => p.id !== playerId);
+      if (wasHost && room.players.length > 0) room.host = room.players[0].id;
+      if (room.players.length === 0) { delete rooms[roomCode]; return; }
+      broadcast(room);
     }
-
-    // si plus personne → delete room
-    if (room.players.length === 0) {
-      delete rooms[roomCode];
-      return;
-    }
-
-    // si partie en cours → éliminer joueur
-    const player = playerById(room, playerId);
-    if (player) {
-      player.eliminated = true;
-    }
-
-    broadcast(room);
   });
 
 }); // 🛠️ FIX 2: Properly close the main io.on('connection', ...) block here
