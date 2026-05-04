@@ -758,7 +758,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('game:replay', () => {
+socket.on('game:replay', () => {
     const { roomCode, playerId } = socket.data || {};
     const room = rooms[roomCode];
     if (!room || room.host !== playerId) return;
@@ -795,6 +795,9 @@ io.on('connection', (socket) => {
 
     broadcast(room);
   });
+
+  // 🛠️ FIX 1: Added the missing event listener header for this block
+  socket.on('room:reconnect', ({ rc, playerId }) => {
     const room = rooms[rc];
     if (!room) return socket.emit('error', 'Salle introuvable ou expirée.');
     const p = playerById(room, playerId);
@@ -815,38 +818,36 @@ io.on('connection', (socket) => {
     broadcast(room);
   });
 
-
   socket.on('room:leave', () => {
-  const { roomCode, playerId } = socket.data || {};
-  const room = rooms[roomCode];
-  if (!room) return;
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room) return;
 
-  // retirer joueur
-  room.players = room.players.filter(p => p.id !== playerId);
+    // retirer joueur
+    room.players = room.players.filter(p => p.id !== playerId);
 
-  // si host quitte → nouveau host
-  if (room.host === playerId && room.players.length > 0) {
-    room.host = room.players[0].id;
-  }
+    // si host quitte → nouveau host
+    if (room.host === playerId && room.players.length > 0) {
+      room.host = room.players[0].id;
+    }
 
-  // si plus personne → delete room
-  if (room.players.length === 0) {
-    delete rooms[roomCode];
-    return;
-  }
+    // si plus personne → delete room
+    if (room.players.length === 0) {
+      delete rooms[roomCode];
+      return;
+    }
 
-  // si partie en cours → éliminer joueur
-  const player = playerById(room, playerId);
-  if (player) {
-    player.eliminated = true;
-  }
+    // si partie en cours → éliminer joueur
+    const player = playerById(room, playerId);
+    if (player) {
+      player.eliminated = true;
+    }
 
-  broadcast(room);
-});
+    broadcast(room);
+  });
 
-
-
-
+}); // 🛠️ FIX 2: Properly close the main io.on('connection', ...) block here
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Serveur Complots en écoute sur le port ${PORT}`));
+// 🛠️ FIX 3: Removed the stray closing brace '}' that was at the end of the file
