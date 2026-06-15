@@ -1,762 +1,937 @@
-// ── IMAGES ───────────────────────────────────────────────────────────────────
-function getCardImage(cardName) {
-  const imageMap = {
-    "Assassin": "Assassin.png",
-    "Comtesse": "Comtesse.png",
-    "Capitaine": "Capitaine.png",
-    "Ambassadeur": "Ambassadeur.png",
-    "Inquisiteur": "Inquisiteur.png",
-    "Espion": "Espion.png",
-    "Pape": "Pape.png",
-    "Justicier": "Justicier.png",
-    "Ursuline": "Ursuline.png",
-    "Illusionniste": "Illusionniste.png",
-    "Bourreau": "Bourreau.png",
-    "Maître Chanteur": "MaitreChanteur.png",
-    "Croque Mort": "CroqueMort.png",
-    "Sorcière": "Sorcière.png",
-    "Duchesse": "Duchesse.png",
-    "Dos": "Dos.png"
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
+
+// ── State ────────────────────────────────────────────────────────────────────
+const rooms = {};
+
+// Dictionnaire complet des personnages
+const ALL_CHARACTERS = {
+  // Complots 1
+  'Duchesse':       { icon: '♛', type: 'complots2', short: 'Taxes · Bloque aide étrangère' },
+  'Duc':            { icon: '♛', type: 'classic',   short: 'Taxes · Bloque aide étrangère' },
+  'Assassin':       { icon: '☽', type: 'classic',   short: 'Assassine pour 3 pièces' },
+  'Comtesse':       { icon: '❦', type: 'classic',   short: 'Bloque l\'Assassin/Bourreau' },
+  'Capitaine':      { icon: '⚓', type: 'classic',   short: 'Vole 2 pièces · Bloque Vol' },
+  'Ambassadeur':    { icon: '⚜', type: 'classic',   short: 'Échange cartes · Bloque Vol' },
+  'Inquisiteur':    { icon: '⚖', type: 'classic',   short: 'Regarde/Échange · Bloque Vol' },
+  // Complots 2
+  'Espion':         { icon: '👁', type: 'complots2', short: 'Regarde 1 carte · Vole 1 pièce' },
+  'Pape':           { icon: '👑', type: 'complots2', short: 'Prend 1 pièce à chaque joueur' },
+  'Justicier':      { icon: '⚖', type: 'complots2', short: 'Vole 2 pièces · Bloque Vol' },
+  'Ursuline':       { icon: '⛪', type: 'complots2', short: 'Prend 3 au trésor · Donne 1 à cible' },
+  'Illusionniste':  { icon: '🎩', type: 'complots2', short: 'Prend 4 pièces · Bloque aide' },
+  'Bourreau':       { icon: '⛏', type: 'complots2', short: 'Assassine pour 3 pièces' },
+  'Maître Chanteur':{ icon: '📜', type: 'complots2', short: 'Force la cible à payer 3 ou mourir' },
+  'Croque Mort':    { icon: '⚰️', type: 'complots2', short: 'Prend l\'or du mort · Bloque assassin' },
+  'Sorcière':       { icon: '🔮', type: 'complots2', short: 'PASSIF : reçoit 5 pièces quand révélée' },
+};
+
+// Personnages valides par action (pour les contestations)
+const ACTION_VALID_CHARS = {
+  'tax':        ['Duc', 'Duchesse'],
+  'steal':      ['Capitaine', 'Justicier'],
+  'assassinate':['Assassin', 'Bourreau'],
+  'exchange':   ['Ambassadeur', 'Inquisiteur'],
+  'spy':        ['Espion'],
+  'tax_all':    ['Pape'],
+  'tithe':      ['Ursuline'],
+  'extort4':    ['Illusionniste'],
+  'blackmail':  ['Maître Chanteur'],
+};
+
+// Actions pouvant être bloquées et par quel(s) personnage(s)
+const BLOCKABLE_BY = {
+  'foreign_aid': ['Duc', 'Duchesse', 'Illusionniste'],
+  'steal':       ['Capitaine', 'Ambassadeur', 'Inquisiteur', 'Justicier'],
+  'assassinate': ['Comtesse', 'Croque Mort'],
+  'spy':         [],
+  'tax':         [],
+  'tax_all':     [],
+  'tithe':       [],
+  'extort4':     [],
+  'blackmail':   [],
+  'exchange':    [],
+};
+
+// Actions qui NE PEUVENT PAS être contestées (pas de claim de personnage)
+const NON_CONTESTABLE = ['income', 'coup', 'foreign_aid'];
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function buildDeck(playerCount, roster) {
+  const times = playerCount >= 7 ? 4 : 3;
+  const deck = [];
+  roster.forEach(c => { for (let i = 0; i < times; i++) deck.push(c); });
+  shuffle(deck);
+  return deck;
+}
+
+function makeCode() {
+  return Math.random().toString(36).slice(2, 6).toUpperCase();
+}
+
+function alivePlayers(room) {
+  return room.players.filter(p => !p.eliminated);
+}
+
+function broadcast(room) {
+  room.players.forEach(p => {
+    io.to(p.socketId).emit('game:state', buildView(room, p.id));
+  });
+}
+
+function buildView(room, playerId) {
+  return {
+    roomCode: room.code,
+    host: room.host,
+    phase: room.phase,
+    settings: room.settings,
+    timerDuration: room.timerDuration,
+    currentPlayerId: room.currentPlayerId,
+    treasury: room.treasury,
+    log: room.log,
+    pendingAction: room.pendingAction,
+    challengeCtx: room.challengeCtx,
+    timerEnd: room.timerEnd,
+    pickCtx: room.pickCtx
+      ? { type: room.pickCtx.type, playerId: room.pickCtx.playerId, options: room.pickCtx.playerId === playerId ? room.pickCtx.options : null }
+      : null,
+    exchangeCtx: room.exchangeCtx && room.exchangeCtx.playerId === playerId ? room.exchangeCtx : null,
+    // Espion : révélation privée uniquement pour l'espion
+    spyCtx: room.spyCtx && room.spyCtx.spyId === playerId ? room.spyCtx : (room.spyCtx ? { spyId: room.spyCtx.spyId } : null),
+    // Maître Chanteur : partagé (la cible doit pouvoir répondre)
+    blackmailCtx: room.blackmailCtx || null,
+    // Croque Mort : partagé pour la fenêtre de réclamation
+    croqueMortCtx: room.croqueMortCtx ? {
+      deceasedName: room.croqueMortCtx.deceasedName,
+      coins: room.croqueMortCtx.coins,
+      claimerId: room.croqueMortCtx.claimerId || null,
+      claimerName: room.croqueMortCtx.claimerName || null,
+    } : null,
+    players: room.players.map(p => ({
+      id: p.id,
+      name: p.name,
+      coins: p.coins,
+      eliminated: p.eliminated,
+      cardCount: p.hand.length,
+      hand: p.id === playerId ? p.hand : null,
+      revealed: p.revealed,
+      hasPassed: room.passedPlayers.includes(p.id)
+    })),
+    winnerId: room.winnerId,
+    started: room.started,
   };
-
-  const fileName = imageMap[cardName];
-  
-  if (fileName) {
-    return `image/${fileName}`;
-  }
-  return null;
 }
 
-// ── CONFIG ───────────────────────────────────────────────────────────────────
-const RENDER_URL = 'https://complots-server.onrender.com';
-const socket = io(RENDER_URL, { reconnection: true, reconnectionDelay: 2000, reconnectionAttempts: 15 });
-let myId = null, roomCode = null, gameState = null, prevTurnId = null, timerInterval = null;
-let prevRevealedCounts = {}; // track revealed counts per player for flip animation
-let chatMessages = []; // store chat messages for the game
-
-const PRESETS = {
-  'classic': {
-    '1': { name: '1: Base (Duchesse, Assassin, Capitaine, Ambassadeur, Comtesse)', roster: ['Duchesse','Assassin','Capitaine','Ambassadeur','Comtesse'] },
-    '2': { name: '2: Inquisiteur (Duchesse, Assassin, Capitaine, Inquisiteur, Comtesse)', roster: ['Duchesse','Assassin','Capitaine','Inquisiteur','Comtesse'] },
-    'custom': { name: '⚙️ Personnaliser...', roster: [] }
-  },
-  'complots2': {
-    '1': { name: '1: Catéchumène', roster: ['Bourreau','Espion','Justicier','Sorcière','Ursuline'] },
-    '2': { name: '2: Expert', roster: ['Maître Chanteur','Espion','Pape','Croque Mort','Illusionniste'] },
-    '3': { name: '3: Mix Catéchumène', roster: ['Bourreau','Ambassadeur','Capitaine','Sorcière','Duchesse'] },
-    '4': { name: '4: Mix Expert', roster: ['Assassin','Inquisiteur','Pape','Croque Mort','Illusionniste'] },
-    '5': { name: '5: Mix Finances', roster: ['Maître Chanteur','Espion','Pape','Sorcière','Duchesse'] },
-    '6': { name: '6: Mix Fraternité', roster: ['Bourreau','Ambassadeur','Justicier','Comtesse','Ursuline'] },
-    '7': { name: '7: Mix Gratifications', roster: ['Maître Chanteur','Inquisiteur','Justicier','Croque Mort','Illusionniste'] },
-    'custom': { name: '⚙️ Personnaliser...', roster: [] }
-  }
-};
-
-const CHARS = {
-  'Assassin':       { icon:'☽', css:'classic',   short:'Assassine pour 3 pièces', passive:false },
-  'Comtesse':       { icon:'❦', css:'classic',   short:'Bloque Assassin/Bourreau', passive:false },
-  'Capitaine':      { icon:'⚓', css:'classic',   short:'Vole 2 pièces · Bloque Vol', passive:false },
-  'Ambassadeur':    { icon:'⚜', css:'classic',   short:'Échange cartes · Bloque Vol', passive:false },
-  'Inquisiteur':    { icon:'⚖', css:'classic',   short:'Regarde/Échange · Bloque Vol', passive:false },
-  'Espion':         { icon:'👁', css:'complots2', short:'Regarde 1 carte · Vole 1 pièce', passive:false },
-  'Pape':           { icon:'👑', css:'complots2', short:'Prend 1 pièce à chaque joueur', passive:false },
-  'Justicier':      { icon:'⚖', css:'complots2', short:'Vole 2 pièces · Bloque Vol', passive:false },
-  'Ursuline':       { icon:'⛪', css:'complots2', short:'Prend 3 au trésor, donne 1', passive:false },
-  'Illusionniste':  { icon:'🎩', css:'complots2', short:'Prend 4 pièces · Bloque aide', passive:false },
-  'Bourreau':       { icon:'⛏', css:'complots2', short:'Assassine pour 3 pièces', passive:false },
-  'Maître Chanteur':{ icon:'📜', css:'complots2', short:'Force la cible à payer 3 ou mourir', passive:false },
-  'Croque Mort':    { icon:'⚰️', css:'complots2', short:"Passif : récupère l'or du mort · Bloque assassin", passive:true },
-  'Sorcière':       { icon:'🔮', css:'complots2', short:'Passif : +5 pièces quand révélée', passive:true },
-  'Duchesse':       { icon:'♛', css:'complots2', short:'Taxes (3 pièces) · Bloque aide', passive:false },
-};
-
-// ── TURN NOTIFICATION SOUND ───────────────────────────────────────────────────
-function playTurnSound() {
-  try {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const now = audioContext.currentTime;
-    
-    // Create a pleasant bell-like sound
-    const osc = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    
-    osc.connect(gain);
-    gain.connect(audioContext.destination);
-    
-    osc.frequency.setValueAtTime(800, now);
-    osc.frequency.exponentialRampToValueAtTime(600, now + 0.3);
-    
-    gain.gain.setValueAtTime(0.3, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-    
-    osc.start(now);
-    osc.stop(now + 0.3);
-  } catch(e) {
-    console.log('Audio context error:', e);
-  }
+function addLog(room, msg) {
+  room.log.unshift(msg);
+  if (room.log.length > 40) room.log.pop();
 }
 
-// ── SOCKET ───────────────────────────────────────────────────────────────────
-socket.on('connect', () => {
-  document.getElementById('connecting').style.display = 'none';
-  
-  // Restore saved player name
-  try {
-    const savedName = localStorage.getItem('complots_name');
-    if (savedName) document.getElementById('inp-name').value = savedName;
-  } catch(e) {}
-  
-  // Try to rejoin existing session
-  try {
-    const saved = JSON.parse(localStorage.getItem('complots_session') || 'null');
-    if (saved?.roomCode && saved?.playerId) {
-      myId = saved.playerId;
-      roomCode = saved.roomCode;
-      // Try to rejoin, if it fails, we'll go to home screen
-      socket.emit('room:rejoin', { roomCode: saved.roomCode, playerId: saved.playerId });
-    } else {
-      show('home');
+function clearRoomTimer(room) {
+  if (room.timer) clearTimeout(room.timer);
+  room.timer = null;
+  room.timerEnd = null;
+}
+
+function nextTurn(room) {
+  clearRoomTimer(room);
+  room.phase = 'action';
+  room.pendingAction = null;
+  room.challengeCtx = null;
+  room.pickCtx = null;
+  room.exchangeCtx = null;
+  room.spyCtx = null;
+  room.blackmailCtx = null;
+  room.croqueMortCtx = null;
+  room.passedPlayers = [];
+
+  if (checkWin(room)) return;
+
+  const alive = alivePlayers(room);
+  const currentIdx = alive.findIndex(p => p.id === room.currentPlayerId);
+  const next = alive[(currentIdx + 1) % alive.length];
+  room.currentPlayerId = next.id;
+  broadcast(room);
+}
+
+function checkWin(room) {
+  const alive = alivePlayers(room);
+  if (alive.length === 1) {
+    room.phase = 'ended';
+    room.winnerId = alive[0].id;
+    addLog(room, `🏆 ${alive[0].name} remporte la partie !`);
+    broadcast(room);
+    return true;
+  }
+  return false;
+}
+
+function playerById(room, id) {
+  return room.players.find(p => p.id === id);
+}
+
+function loseCard(room, playerId, cardIndex, cb) {
+  clearRoomTimer(room);
+  const p = playerById(room, playerId);
+
+  if (p.hand.length === 0) {
+    if (!p.eliminated) {
+      p.eliminated = true;
+      addLog(room, `💀 ${p.name} est éliminé.`);
     }
-  } catch(e) {
-    console.error('Session restore error:', e);
-    // Clear potentially corrupted session data
-    try {
-      localStorage.removeItem('complots_session');
-    } catch(e2) {}
-    show('home');
+    if (cb) cb();
+    return;
   }
-});
 
-socket.on('connect_error', () => { 
-  document.querySelector('.connecting-msg').textContent = 'Serveur en démarrage (~30s)...'; 
-});
+  if (p.hand.length === 1 || cardIndex !== undefined) {
+    const idx = cardIndex ?? 0;
+    const card = p.hand.splice(idx, 1)[0];
+    p.revealed.push(card);
+    addLog(room, `👁 ${p.name} révèle et perd : ${card}.`);
 
-socket.on('disconnect', () => {
-  // On disconnect, be careful with localStorage - only keep current state
-  try {
-    if (myId && roomCode && gameState) {
-      // Update only if we have valid game state
-      localStorage.setItem('complots_session', JSON.stringify({ roomCode, playerId: myId }));
+    // ── Passif Sorcière : reçoit 5 pièces quand sa carte est révélée ──
+    if (card === 'Sorcière') {
+      const bonus = Math.min(5, room.treasury);
+      p.coins += bonus;
+      room.treasury -= bonus;
+      addLog(room, `🔮 La Sorcière de ${p.name} se déchaîne : +${bonus} pièce(s) !`);
     }
-  } catch(e) {
-    // Ignore localStorage errors on disconnect
-  }
-});
 
-socket.on('room:rejoin_failed', () => {
-  // Session is invalid, clear it and go home
-  try {
-    localStorage.removeItem('complots_session');
-  } catch(e) {}
-  show('home');
-  toast('❌ Impossible de rejoindre la salle');
-});
+    if (p.hand.length === 0) {
+      p.eliminated = true;
+      addLog(room, `💀 ${p.name} est éliminé.`);
+    }
 
-setTimeout(() => { 
-  const c = document.getElementById('connecting'); 
-  if(c && c.style.display !== 'none') {
-    c.style.display='none';
-    show('home');
-  }
-}, 12000);
-
-function show(id) { 
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); 
-  document.getElementById(id).classList.add('active'); 
-}
-
-function me() { 
-  return gameState?.players.find(p => p.id === myId); 
-}
-
-function currentPlayer() { 
-  return gameState?.players.find(p => p.id === gameState.currentPlayerId); 
-}
-
-function isMyTurn() { 
-  return gameState?.currentPlayerId === myId; 
-}
-
-function toast(msg, d=2800) { 
-  const el=document.getElementById('toast'); 
-  el.textContent=msg; 
-  el.classList.add('show'); 
-  setTimeout(()=>el.classList.remove('show'),d); 
-}
-
-socket.on('room:joined', ({ roomCode: rc, playerId }) => {
-  roomCode = rc;
-  myId = playerId;
-  try {
-    localStorage.setItem('complots_session', JSON.stringify({ roomCode: rc, playerId }));
-  } catch(e) {
-    console.error('Could not save session:', e);
-  }
-  show('lobby');
-});
-
-socket.on('room:state', state => {
-  try {
-    gameState = state;
-    renderLobby(state);
-  } catch(e) {
-    console.error('Lobby render error:', e);
-  }
-});
-
-socket.on('game:state', state => {
-  try {
-    gameState = state;
-    
-    if (state.phase === 'ended' && state.winnerId) {
-      const w = state.players.find(p => p.id === state.winnerId);
-      document.getElementById('winner-name').textContent = w.name;
-      const btnReplay = document.getElementById('btn-replay');
-      btnReplay.style.display = state.host === myId ? '' : 'none';
-      show('winner');
+    // ── Passif Croque Mort : fenêtre de réclamation après élimination ──
+    if (p.eliminated && p.coins > 0 && room.settings.roster.includes('Croque Mort')) {
+      const inheritedCoins = p.coins;
+      p.coins = 0;
+      room.croqueMortCtx = {
+        deceasedName: p.name,
+        coins: inheritedCoins,
+        cb,
+      };
+      room.passedPlayers = [];
+      room.phase = 'croque_mort';
+      const duration = Math.min(room.settings.turnDuration * 1000, 15000);
+      room.timerDuration = duration;
+      room.timerEnd = Date.now() + duration;
+      room.timer = setTimeout(() => {
+        clearRoomTimer(room);
+        // Personne n'a réclamé → pièces au trésor
+        room.treasury += room.croqueMortCtx?.coins || 0;
+        addLog(room, `⚰️ L'héritage de ${p.name} retourne au trésor.`);
+        const savedCb = room.croqueMortCtx?.cb;
+        room.croqueMortCtx = null;
+        if (savedCb) savedCb();
+      }, duration);
+      broadcast(room);
       return;
     }
-    
-    if (!state.started) {
-      show('lobby');
-      document.getElementById('lobby-code').textContent = state.roomCode;
-      renderLobby(state);
-      return;
+
+    if (cb) cb();
+    return;
+  }
+
+  room.phase = 'pick';
+  room.pickCtx = { playerId, cb, options: p.hand.map((c, i) => ({ card: c, index: i })) };
+  broadcast(room);
+}
+
+function resolveAction(room) {
+  clearRoomTimer(room);
+  const pa = room.pendingAction;
+  const actor = playerById(room, pa.actorId);
+  const target = pa.targetId ? playerById(room, pa.targetId) : null;
+
+  switch (pa.id) {
+    case 'income':
+      actor.coins += 1; room.treasury -= 1;
+      addLog(room, `💰 ${actor.name} prend 1 pièce (revenu).`);
+      nextTurn(room);
+      break;
+
+    case 'foreign_aid':
+      actor.coins += 2; room.treasury -= 2;
+      addLog(room, `💰 ${actor.name} reçoit l'aide étrangère (+2 pièces).`);
+      nextTurn(room);
+      break;
+
+    case 'tax':
+      actor.coins += 3; room.treasury -= 3;
+      addLog(room, `💰 ${actor.name} collecte les taxes (+3 pièces).`);
+      nextTurn(room);
+      break;
+
+    case 'steal': {
+      const stolen = Math.min(2, target.coins);
+      target.coins -= stolen; actor.coins += stolen;
+      addLog(room, `⚓ ${actor.name} vole ${stolen} pièce(s) à ${target.name}.`);
+      nextTurn(room);
+      break;
     }
-    
-    // Play sound and show toast when it's your turn
-    if (state.currentPlayerId === myId && prevTurnId !== myId) {
-      playTurnSound();
-      toast('⚔ C\'est votre tour !');
-      const gb = document.getElementById('game-body');
-      gb?.classList.add('my-turn-flash');
-      setTimeout(() => gb?.classList.remove('my-turn-flash'), 900);
+
+    case 'assassinate':
+      actor.coins -= 3; room.treasury += 3;
+      addLog(room, `☽ ${actor.name} assassine ${target.name} !`);
+      loseCard(room, target.id, undefined, () => { if (!checkWin(room)) nextTurn(room); });
+      break;
+
+    case 'exchange': {
+      const drawn = [room.deck.pop(), room.deck.pop()].filter(Boolean);
+      room.exchangeCtx = { playerId: actor.id, options: [...actor.hand, ...drawn], keepCount: actor.hand.length };
+      room.phase = 'exchange';
+      addLog(room, `⚜ ${actor.name} échange ses cartes.`);
+      broadcast(room);
+      break;
     }
-    
-    prevTurnId = state.currentPlayerId;
-    show('game');
-    renderGame(state);
-  } catch(e) {
-    console.error('Game render error:', e);
-  }
-});
 
-// Chat event from server
-socket.on('chat:message', (msg) => {
-  try {
-    chatMessages.push(msg);
-    // Keep only last 50 messages
-    if (chatMessages.length > 50) chatMessages.shift();
-    updateChatDisplay();
-  } catch(e) {
-    console.error('Chat message error:', e);
-  }
-});
+    case 'coup':
+      actor.coins -= 7; room.treasury += 7;
+      addLog(room, `⚔ ${actor.name} lance un coup d'état contre ${target.name} !`);
+      loseCard(room, target.id, undefined, () => { if (!checkWin(room)) nextTurn(room); });
+      break;
 
-// ── LOBBY ─────────────────────────────────────────────────────────────────────
-function renderLobby(state) {
-  document.getElementById('lobby-players').innerHTML = state.players.map(p => `
-    <div class="lobby-player">
-      <div class="p-avatar">${p.name.slice(0,2).toUpperCase()}</div>
-      <span class="p-lname">${p.name}</span>
-      ${p.id === state.host ? '<span class="host-crown">♛</span>' : ''}
-    </div>`).join('');
+    // ── COMPLOTS 2 ────────────────────────────────────────────────────────────
 
-  const isHost = state.host === myId;
-  document.getElementById('btn-start').style.display = isHost ? '' : 'none';
-  document.getElementById('waiting-note').style.display = isHost ? 'none' : '';
-  document.getElementById('host-settings').style.display = isHost ? '' : 'none';
-  document.getElementById('guest-settings').style.display = isHost ? 'none' : '';
+    case 'spy': {
+      // Regarde 1 carte aléatoire de la cible + vole 1 pièce
+      if (!target || target.hand.length === 0) { nextTurn(room); break; }
+      const revealedCard = target.hand[Math.floor(Math.random() * target.hand.length)];
+      const stolenSpy = Math.min(1, target.coins);
+      target.coins -= stolenSpy;
+      actor.coins += stolenSpy;
+      addLog(room, `👁 ${actor.name} (Espion) espionne ${target.name} et vole ${stolenSpy} pièce(s).`);
+      room.spyCtx = { spyId: actor.id, card: revealedCard, targetName: target.name };
+      room.phase = 'spy_reveal';
+      const spyDuration = room.settings.turnDuration * 1000;
+      room.timerDuration = spyDuration;
+      room.timerEnd = Date.now() + spyDuration;
+      room.timer = setTimeout(() => {
+        clearRoomTimer(room);
+        room.spyCtx = null;
+        nextTurn(room);
+      }, spyDuration);
+      broadcast(room);
+      break;
+    }
 
-  if (isHost) {
-    const typeSelect = document.getElementById('inp-type');
-    const presetSelect = document.getElementById('inp-preset');
-    if (!typeSelect.value || typeSelect.value !== state.settings.type) typeSelect.value = state.settings.type || 'classic';
-    const currentType = typeSelect.value;
-    let optHtml = '';
-    for (const key in PRESETS[currentType]) optHtml += `<option value="${key}">${PRESETS[currentType][key].name}</option>`;
-    presetSelect.innerHTML = optHtml;
-    presetSelect.value = state.settings.preset || '1';
-    document.getElementById('inp-duration').value = state.settings.turnDuration || 30;
-    document.getElementById('dur-val').textContent = state.settings.turnDuration || 30;
-    const customBox = document.getElementById('custom-roster-box');
-    if (presetSelect.value === 'custom') { customBox.style.display='block'; renderCustomRosterChoices(currentType); }
-    else customBox.style.display = 'none';
-  } else {
-    // Afficher les settings en lecture seule pour les non-hôtes
-    const s = state.settings;
-    const rosterHtml = (s.roster||[]).map(c => `<span class="roster-chip">${CHARS[c]?.icon||'?'} ${c}</span>`).join('');
-    const typeLabel = s.type === 'complots2' ? 'Complots 2' : 'Complots 1';
-    const presetName = PRESETS[s.type]?.[s.preset]?.name || s.preset;
-    document.getElementById('settings-preview-box').innerHTML = `
-      <div class="settings-preview-row"><span class="settings-preview-label">Version</span>${typeLabel}</div>
-      <div class="settings-preview-row"><span class="settings-preview-label">Preset</span>${presetName}</div>
-      <div class="settings-preview-row"><span class="settings-preview-label">Timer</span>${s.turnDuration}s</div>
-      <div class="roster-chips">${rosterHtml}</div>`;
-  }
-}
+    case 'tax_all': {
+      // Prend 1 pièce à chaque autre joueur vivant
+      let total = 0;
+      alivePlayers(room).forEach(p => {
+        if (p.id !== actor.id && p.coins > 0) {
+          p.coins -= 1;
+          total += 1;
+        }
+      });
+      actor.coins += total;
+      addLog(room, `👑 ${actor.name} (Pape) prélève 1 pièce à chaque joueur (+${total} pièces).`);
+      nextTurn(room);
+      break;
+    }
 
-function switchType() {
-  const t = document.getElementById('inp-type').value;
-  const ps = document.getElementById('inp-preset');
-  let h=''; for(const k in PRESETS[t]) h+=`<option value="${k}">${PRESETS[t][k].name}</option>`;
-  ps.innerHTML=h; updateSettings();
-}
-
-function changePreset() {
-  const p=document.getElementById('inp-preset').value;
-  const cb=document.getElementById('custom-roster-box');
-  if(p==='custom'){cb.style.display='block';renderCustomRosterChoices(document.getElementById('inp-type').value);}
-  else cb.style.display='none';
-  updateSettings();
-}
-
-function renderCustomRosterChoices(type) {
-  const c=document.getElementById('custom-choices'); c.innerHTML='';
-  Object.keys(CHARS).filter(k=>CHARS[k].css===(type==='complots2'?'complots2':'classic')).forEach(ch=>{
-    const ck=gameState?.settings.roster.includes(ch);
-    const i=document.createElement('label');
-    i.style.cssText='display:flex;align-items:center;gap:8px;font-size:12px;font-family:Cinzel,serif;cursor:pointer';
-    i.innerHTML=`<input type="checkbox" name="custom-card" value="${ch}" ${ck?'checked':''} onchange="updateSettings()"> ${CHARS[ch].icon} ${ch}`;
-    c.appendChild(i);
-  });
-}
-
-function updateSettings() {
-  if(gameState&&gameState.host!==myId)return;
-  const d=parseInt(document.getElementById('inp-duration').value,10);
-  document.getElementById('dur-val').textContent=d;
-  const type=document.getElementById('inp-type').value;
-  const preset=document.getElementById('inp-preset').value;
-  let roster=[];
-  if(preset==='custom'){const cks=document.querySelectorAll('input[name="custom-card"]:checked');roster=Array.from(cks).map(c=>c.value).slice(0,5);}
-  else roster=PRESETS[type][preset]?.roster||[];
-  socket.emit('room:settings',{turnDuration:d,type,preset,roster});
-}
-
-// ── GAME ──────────────────────────────────────────────────────────────────────
-function renderGame(state) {
-  const cp = currentPlayer();
-  document.getElementById('turn-name').textContent = cp ? cp.name : '—';
-  document.getElementById('treasury-val').textContent = `${state.treasury} pièces`;
-  const body = document.getElementById('game-body');
-  body.innerHTML = '';
-
-  // Marquer les nouvelles cartes révélées depuis le dernier render
-  state.players.forEach(p => {
-    const prev = prevRevealedCounts[p.id] || 0;
-    p._newReveal = p.revealed.length > prev ? p.revealed.length - 1 : -1;
-    prevRevealedCounts[p.id] = p.revealed.length;
-  });
-
-  // Timer
-  body.insertAdjacentHTML('afterbegin', `<div class="timer-container"><div class="timer-bar" id="dyn-timer-bar"></div></div>`);
-  startTimerUI(state.timerEnd, state.timerDuration);
-
-  // Joueurs
-  const tableDiv = document.createElement('div');
-  tableDiv.innerHTML = '<div class="table-label">Tableau de jeu</div>';
-  const grid = document.createElement('div'); grid.className = 'players-table';
-  state.players.forEach(p => {
-    const tile = document.createElement('div');
-    tile.className = 'player-tile' + (p.id===state.currentPlayerId?' is-turn':'') + (p.id===myId?' is-me':'') + (p.eliminated?' elim':'');
-    
-    const revealedSlots = p.revealed.map((c, i) => {
-      const img = getCardImage(c);
-      const isNew = p._newReveal === i;
-      if (img) {
-        return `<div class="mini-card revealed${isNew?' card-flip':''}"><img src="${img}" alt="${c}"><div class="mini-card-name">${c}</div></div>`;
+    case 'tithe': {
+      // Prend 3 au trésor, donne 1 à la cible (net: acteur +2, cible +1)
+      const availTithe = Math.min(3, room.treasury);
+      actor.coins += availTithe;
+      room.treasury -= availTithe;
+      if (target && availTithe >= 1) {
+        actor.coins -= 1;
+        target.coins += 1;
+        addLog(room, `⛪ ${actor.name} (Ursuline) prend 3 au trésor et donne 1 à ${target.name}.`);
       } else {
-        return `<div class="mini-card revealed${isNew?' card-flip':''}"><span style="font-size:8px;color:#f4b0b0">${c.slice(0,3)}</span></div>`;
+        addLog(room, `⛪ ${actor.name} (Ursuline) prend ${availTithe} pièce(s) au trésor.`);
       }
-    }).join('');
-
-    const faceDownSlots = Array(p.cardCount).fill(null).map(() => {
-      const dosImg = getCardImage('Dos');
-      if (dosImg) {
-        return `<div class="mini-card face-down"><img src="${dosImg}" alt="dos"></div>`;
-      } else {
-        return `<div class="mini-card face-down">✦</div>`;
-      }
-    }).join('');
-
-    const slots = revealedSlots + faceDownSlots;
-
-    tile.innerHTML = `${p.id===state.currentPlayerId&&!p.eliminated?'<div class="turn-crown">♛</div>':''}${p.eliminated?'<span class="elim-skull">💀</span>':''}\r\n      <div class="tile-name">${p.name}${p.id===myId?' (vous)':''}</div>\r\n      <div class="tile-coins">◈ ${p.coins}</div>\r\n      <div class="tile-cards">${slots}</div>`;
-    grid.appendChild(tile);
-  });
-  tableDiv.appendChild(grid); body.appendChild(tableDiv);
-
-  // Main et Chat
-  const myP = me();
-  if (myP && !myP.eliminated && myP.hand) {
-    const sec = document.createElement('div');
-    sec.className = 'hand-section';
-    
-    // Hand cards
-    const handCardsHtml = `<div class="hand-cards">${
-      myP.hand.map(c => {
-        const ch = CHARS[c]||{icon:'?',css:'classic',short:'',passive:false};
-        const img = getCardImage(c);
-        return `<div class="big-card">
-          ${img ? `<img class="card-img" src="${img}" alt="${c}">` : `<div class="card-img-placeholder card-art ${ch.css}">${ch.icon}</div>`}
-          <div class="card-body">
-            <div class="card-char-name">${c}</div>
-            <div class="card-power">${ch.short}</div>
-            ${ch.passive?'<div class="card-passive-badge">✦ passif</div>':''}
-          </div>
-        </div>`;
-      }).join('')
-    }</div>`;
-
-    // Chat section (à droite)
-    const chatSectionHtml = `<div class="chat-section">
-      <div class="chat-header">💬 Complot</div>
-      <div class="chat-messages" id="chat-messages-list"></div>
-      <div class="chat-input-wrap">
-        <input type="text" class="chat-input" id="chat-input" placeholder="Votre message..." maxlength="100">
-        <button class="chat-btn" onclick="sendChatMessage()">↑</button>
-      </div>
-    </div>`;
-
-    sec.innerHTML = `<div class="hand-label">Vos cartes secrètes</div>${handCardsHtml}${chatSectionHtml}`;
-    body.appendChild(sec);
-    
-    // Set up chat input handler
-    const chatInput = document.getElementById('chat-input');
-    chatInput?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        sendChatMessage();
-      }
-    });
-    
-    // Populate chat messages
-    updateChatDisplay();
-  }
-
-  // Phase
-  const phase = state.phase;
-  if (phase==='action' && isMyTurn())         renderActionPanel(body, state);
-  else if (phase==='challenge')               renderChallengePanel(body, state);
-  else if (phase==='block_challenge')         renderBlockPanel(body, state);
-  else if (phase==='pick' && state.pickCtx?.playerId===myId) renderPickPanel(body, state);
-  else if (phase==='exchange' && state.exchangeCtx?.playerId===myId) renderExchangePanel(body, state);
-  else if (phase==='spy_reveal')              renderSpyPanel(body, state);
-  else if (phase==='blackmail_response')      renderBlackmailPanel(body, state);
-  else if (phase==='croque_mort')             renderCroqueMortPanel(body, state);
-  else {
-    const w=document.createElement('div'); w.className='waiting-note';
-    w.innerHTML=`En attente de <strong>${cp?.name||'...'}</strong><span class="dots"></span>`;
-    body.appendChild(w);
-  }
-
-  // Log
-  if (state.log?.length) {
-    const log=document.createElement('div'); log.className='log-section';
-    log.innerHTML=state.log.map(l=>`<div class="log-line">${l}</div>`).join('');
-    body.appendChild(log);
-  }
-}
-
-function updateChatDisplay() {
-  const container = document.getElementById('chat-messages-list');
-  if (!container) return;
-  
-  container.innerHTML = chatMessages.map(msg => `
-    <div class="chat-message">
-      <span class="chat-message-player">${msg.playerName}</span>: ${msg.text}
-    </div>
-  `).join('');
-  
-  // Scroll to bottom
-  container.scrollTop = container.scrollHeight;
-}
-
-function sendChatMessage() {
-  const input = document.getElementById('chat-input');
-  if (!input) return;
-  
-  const text = input.value.trim();
-  if (text.length === 0) return;
-  
-  socket.emit('chat:send', { text });
-  input.value = '';
-}
-
-function startTimerUI(timerEnd, durationMs) {
-  if(timerInterval)clearInterval(timerInterval);
-  const bar=document.getElementById('dyn-timer-bar');
-  if(!bar||!timerEnd||!durationMs)return;
-  timerInterval=setInterval(()=>{
-    const r=timerEnd-Date.now();
-    if(r<=0){bar.style.transform='scaleX(0)';bar.style.background='#e85555';clearInterval(timerInterval);}
-    else{const pct=r/durationMs;bar.style.transform=`scaleX(${pct})`;bar.style.background=pct<0.25?'#e85555':pct<0.5?'#e8a827':'';}
-  },50);
-}
-
-// ── ACTION PANEL ──────────────────────────────────────────────────────────────
-function renderActionPanel(body, state) {
-  const p = me(); const mustCoup = p.coins >= 10;
-  const sec=document.createElement('div'); sec.className='action-section';
-  sec.innerHTML='<div class="section-title">Votre action</div><div class="actions-grid" id="acts"></div>';
-  body.appendChild(sec); const g=sec.querySelector('#acts');
-  if(mustCoup){addAct(g,'⚔','Coup d\'État','Obligatoire · '+p.coins+' pièces','danger',()=>openTargetModal('coup'));return;}
-  addAct(g,'◈','Revenu','1 pièce · garanti','',()=>doAction('income'));
-  addAct(g,'⬆','Aide étrangère','2 pièces · peut être bloquée','',()=>doAction('foreign_aid'));
-  state.settings.roster.forEach(char=>{
-    switch(char){
-      case 'Duchesse':
-        addAct(g,CHARS[char].icon,'Taxes',`${char} · 3 pièces`,'char-action',()=>doAction('tax')); break;
-      case 'Capitaine': case 'Justicier':
-        addAct(g,CHARS[char].icon,'Voler',`${char} · 2 pièces`,'char-action',()=>openTargetModal('steal')); break;
-      case 'Assassin': case 'Bourreau':
-        addAct(g,CHARS[char].icon,'Assassiner',`${char} · coûte 3`,'char-action danger',()=>openTargetModal('assassinate'),p.coins<3); break;
-      case 'Ambassadeur': case 'Inquisiteur':
-        addAct(g,CHARS[char].icon,'Échanger',`${char} · changer ses cartes`,'char-action',()=>doAction('exchange')); break;
-      case 'Espion':
-        addAct(g,CHARS[char].icon,'Espionner',`${char} · voir 1 carte + vole 1`,'char-action',()=>openTargetModal('spy')); break;
-      case 'Pape':
-        addAct(g,CHARS[char].icon,'Prélever',`${char} · 1 pièce/joueur`,'char-action',()=>doAction('tax_all')); break;
-      case 'Ursuline':
-        addAct(g,CHARS[char].icon,'Aumône',`${char} · prend 3, donne 1`,'char-action',()=>openTargetModal('tithe')); break;
-      case 'Illusionniste':
-        addAct(g,CHARS[char].icon,'Extorquer',`${char} · 4 pièces au trésor`,'char-action',()=>doAction('extort4')); break;
-      case 'Maître Chanteur':
-        addAct(g,CHARS[char].icon,'Chantage',`${char} · payer 3 ou mourir`,'char-action danger',()=>openTargetModal('blackmail')); break;
+      nextTurn(room);
+      break;
     }
-  });
-  addAct(g,'⚔','Coup d\'État','7 pièces · élimine','danger',()=>openTargetModal('coup'),p.coins<7);
-}
 
-function addAct(grid,icon,name,desc,cls,cb,disabled=false){
-  const b=document.createElement('button');b.className='act-btn '+cls;b.disabled=disabled;b.onclick=cb;b.innerHTML=`<div class="act-icon">${icon}</div><div class="act-label">${name}</div><div class="act-desc">${desc}</div>`;grid.appendChild(b);
-}
-
-function doAction(a){socket.emit('action:do',{actionType:a});}
-function openTargetModal(a){
-  const targets=gameState.players.filter(p=>p.id!==myId&&!p.eliminated).map(p=>({id:p.id,name:p.name}));
-  if(targets.length===0){toast('Aucune cible disponible');return;}
-  showTargetModal(a,targets);
-}
-function showTargetModal(actionType,targets){
-  const m=document.createElement('div');m.className='target-modal';m.innerHTML=`
-    <div class="target-box"><div class="target-title">Choisir une cible</div>
-    <div class="target-list">${targets.map(t=>`<button class="target-btn" onclick="selectTarget('${actionType}','${t.id}')">${t.name}</button>`).join('')}</div>
-    <button class="target-btn target-cancel" onclick="this.closest('.target-modal').remove()">Annuler</button></div>`;
-  document.body.appendChild(m);
-}
-function selectTarget(actionType,targetId){document.querySelector('.target-modal').remove();socket.emit('action:do',{actionType,targetId});}
-
-function renderChallengePanel(body, state) {
-  const pa=state.challengeCtx?.originalAction; if(!pa)return;
-  const actor=state.players.find(p=>p.id===pa.actorId); const amEliminated=me()?.eliminated;
-  const sec=document.createElement('div'); sec.className='challenge-section';
-  sec.innerHTML=`<div class="section-title">⚔ Défi en cours !</div><div class="challenge-message"><strong>${actor?.name}</strong> prétend avoir <strong>${pa.char||'?'}</strong>.</div><div class="phase-btns" id="ch-btns"></div>`;
-  body.appendChild(sec);
-  if(myId===pa.actorId||amEliminated)return;
-  const btns=sec.querySelector('#ch-btns');
-  const iHavePassed = state.players.find(p=>p.id===myId)?.hasPassed;
-  const passBtn = document.createElement('button');
-  passBtn.className = 'ph-btn ph-pass' + (iHavePassed ? ' ph-pass--done' : '');
-  passBtn.textContent = iHavePassed ? '✓ Laissé faire' : 'Laisser faire';
-  passBtn.disabled = iHavePassed;
-  if (!iHavePassed) passBtn.onclick = () => socket.emit('challenge:pass');
-  btns.appendChild(passBtn);
-  if(pa.contestable!==false) mkbtn(btns,'Contester','ph-contest',()=>socket.emit('challenge:contest'));
-  (pa.blockableBy||[]).forEach(c=>{
-    if(state.settings.roster.includes(c)){
-      const canBlock = !pa.blockTargetOnly || myId===pa.targetId;
-      if(canBlock) mkbtn(btns,`Bloquer (${CHARS[c]?.icon||''} ${c})`,'ph-block',()=>socket.emit('challenge:block',{blockChar:c}));
+    case 'extort4': {
+      // Prend 4 pièces au trésor
+      const avail4 = Math.min(4, room.treasury);
+      actor.coins += avail4; room.treasury -= avail4;
+      addLog(room, `🎩 ${actor.name} (Illusionniste) prend ${avail4} pièces au trésor.`);
+      nextTurn(room);
+      break;
     }
-  });
-}
 
-function renderBlockPanel(body, state) {
-  const ctx = state.challengeCtx; if(!ctx)return;
-  const blocker=state.players.find(p=>p.id===ctx.blockerId);
-  const orig=state.players.find(p=>p.id===ctx.originalAction?.actorId);
-  const sec=document.createElement('div'); sec.className='phase-panel phase-block';
-  sec.innerHTML=`<div class="phase-title">🛡 Blocage !</div>
-    <div class="phase-desc"><strong>${blocker?.name}</strong> bloque avec <strong>${ctx.blockChar}</strong>.<br>
-    ${myId===ctx.originalAction?.actorId?'Acceptez-vous ce blocage ?':`En attente de <strong>${orig?.name}</strong>…`}</div>
-    <div class="phase-btns" id="blk-btns"></div>`;
-  body.appendChild(sec);
-  if(myId===ctx.originalAction?.actorId){
-    const btns=sec.querySelector('#blk-btns');
-    mkbtn(btns,'Accepter le blocage','ph-pass',()=>socket.emit('challenge:pass'));
-    mkbtn(btns,'Contester le blocage','ph-contest',()=>socket.emit('block:contest'));
+    case 'blackmail': {
+      // Cible : payer 3 pièces ou perdre une carte
+      addLog(room, `📜 ${actor.name} (Maître Chanteur) fait chanter ${target.name} !`);
+      room.blackmailCtx = { actorId: actor.id, targetId: target.id };
+      room.phase = 'blackmail_response';
+      const bmDuration = room.settings.turnDuration * 1000;
+      room.timerDuration = bmDuration;
+      room.timerEnd = Date.now() + bmDuration;
+      room.timer = setTimeout(() => {
+        clearRoomTimer(room);
+        const t = playerById(room, room.blackmailCtx?.targetId);
+        addLog(room, `⏳ ${t?.name || 'La cible'} n'a pas répondu — résistance forcée !`);
+        const ctx = room.blackmailCtx;
+        room.blackmailCtx = null;
+        room.pendingAction = null;
+        if (t) loseCard(room, t.id, undefined, () => { if (!checkWin(room)) nextTurn(room); });
+        else nextTurn(room);
+      }, bmDuration);
+      broadcast(room);
+      break;
+    }
+
+    default:
+      nextTurn(room);
   }
 }
 
-function renderPickPanel(body, state) {
-  const ctx=state.pickCtx; if(!ctx||ctx.playerId!==myId)return;
-  const sec=document.createElement('div'); sec.className='phase-panel phase-pick';
-  sec.innerHTML=`<div class="phase-title">💀 Révéler une carte</div>
-    <div class="phase-desc">Choisissez quelle carte retourner face visible.</div>
-    <div class="phase-btns">${ctx.options.map(o=>{
-      const img=getCardImage(o.card);
-      const label=img?`<img src="${img}" style="width:28px;height:38px;object-fit:cover;border-radius:3px;margin-right:6px;vertical-align:middle">${o.card}`:o.card;
-      return `<button class="ph-btn ph-pick" onclick="socket.emit('pick:card',{index:${o.index}})">${label}</button>`;
-    }).join('')}</div>`;
-  body.appendChild(sec);
-}
+// ── Socket handlers ──────────────────────────────────────────────────────────
+io.on('connection', (socket) => {
 
-function renderExchangePanel(body, state) {
-  const ctx=state.exchangeCtx; if(!ctx||ctx.playerId!==myId)return;
-  let sel=[]; const kc=ctx.keepCount;
-  const sec=document.createElement('div'); sec.className='exchange-section';
-  sec.innerHTML=`<div class="section-title">⚜ Choisissez ${kc} carte(s) à garder</div>
-    <div class="exchange-cards" id="ex-cards"></div>
-    <div style="margin-top:.75rem"><button class="ph-btn ph-accept" id="ex-confirm" disabled onclick="confirmExchange()">Confirmer</button></div>`;
-  body.appendChild(sec);
-  ctx.options.forEach((card,i)=>{
-    const d=document.createElement('div'); d.className='ex-card';
-    const img=getCardImage(card);
-    d.innerHTML=img?`<img src="${img}" alt="${card}"><div class="ex-card-label">${card}</div>`:`<div style="padding:14px;font-size:18px">${CHARS[card]?.icon||'?'}</div><div class="ex-card-label">${card}</div>`;
-    d.onclick=()=>{
-      if(sel.includes(i)){sel=sel.filter(x=>x!==i);d.classList.remove('selected');}
-      else if(sel.length<kc){sel.push(i);d.classList.add('selected');}
-      document.getElementById('ex-confirm').disabled=sel.length!==kc;
+  socket.on('room:create', ({ name }) => {
+    const code = makeCode();
+    const playerId = 'p_' + Math.random().toString(36).slice(2, 8);
+    rooms[code] = {
+      code,
+      host: playerId,
+      started: false,
+      phase: 'lobby',
+      settings: {
+        turnDuration: 10,
+        type: 'classic',
+        preset: '1',
+        roster: ['Duc', 'Assassin', 'Comtesse', 'Capitaine', 'Ambassadeur']
+      },
+      timerDuration: 10000,
+      players: [{ id: playerId, name, socketId: socket.id, hand: [], revealed: [], coins: 0, eliminated: false }],
+      deck: [],
+      treasury: 0,
+      currentPlayerId: null,
+      log: [],
+      pendingAction: null,
+      challengeCtx: null,
+      passedPlayers: [],
+      pickCtx: null,
+      exchangeCtx: null,
+      spyCtx: null,
+      blackmailCtx: null,
+      croqueMortCtx: null,
+      winnerId: null,
+      timer: null,
+      timerEnd: null,
     };
-    sec.querySelector('#ex-cards').appendChild(d);
+    socket.join(code);
+    socket.data = { roomCode: code, playerId };
+    socket.emit('room:joined', { roomCode: code, playerId });
+    broadcast(rooms[code]);
   });
-  window._exSel=()=>sel;
-}
 
-function confirmExchange(){socket.emit('exchange:pick',{kept:window._exSel?.()});}
+  socket.on('room:join', ({ code, name }) => {
+    code = code.toUpperCase();
+    const room = rooms[code];
+    if (!room) return socket.emit('error', 'Salle introuvable.');
+    if (room.started) return socket.emit('error', 'La partie a déjà commencé.');
+    if (room.players.length >= 6) return socket.emit('error', 'La salle est pleine (6 max).');
 
-function renderSpyPanel(body, state) {
-  const ctx=state.spyCtx; const isTheSpy=ctx&&ctx.spyId===myId;
-  const sec=document.createElement('div'); sec.className='phase-panel phase-spy';
-  if(isTheSpy&&ctx.card){
-    const img=getCardImage(ctx.card);
-    sec.innerHTML=`<div class="phase-title">👁 Résultat d'espionnage</div>
-      <div class="phase-desc">Carte secrète de <strong>${ctx.targetName}</strong> :</div>
-      <div class="spy-reveal-card">${img?`<img class="spy-card-img" src="${img}" alt="${ctx.card}">`:''}
-        <strong>${ctx.card}</strong> ${CHARS[ctx.card]?.icon||''}
-      </div>
-      <div class="phase-btns"><button class="ph-btn ph-spy" onclick="socket.emit('spy:ack')">J'ai vu — Continuer</button></div>`;
-  } else {
-    const spyP=state.players.find(p=>p.id===ctx?.spyId);
-    sec.innerHTML=`<div class="phase-title">👁 Espionnage en cours</div>
-      <div class="phase-desc">En attente de <strong>${spyP?.name||'l\'espion'}</strong><span class="dots"></span></div>`;
-  }
-  body.appendChild(sec);
-}
-
-function renderBlackmailPanel(body, state) {
-  const ctx=state.blackmailCtx; if(!ctx)return;
-  const actor=state.players.find(p=>p.id===ctx.actorId);
-  const target=state.players.find(p=>p.id===ctx.targetId);
-  const isTarget=ctx.targetId===myId; const myCoins=me()?.coins||0;
-  const sec=document.createElement('div'); sec.className='phase-panel phase-blackmail';
-  sec.innerHTML=`<div class="phase-title">📜 Maître Chanteur !</div>
-    <div class="phase-desc"><strong>${actor?.name}</strong> fait chanter <strong>${target?.name}</strong> !<br>
-    ${isTarget?`Payez 3 pièces ou perdez une carte.<br><em style="font-size:11px">Vos pièces : ${myCoins}</em>`:`En attente de <strong>${target?.name}</strong>…`}</div>
-    <div class="phase-btns" id="bm-btns"></div>`;
-  body.appendChild(sec);
-  if(isTarget){const b=sec.querySelector('#bm-btns');mkbtn(b,'💰 Payer 3 pièces','ph-pay',()=>socket.emit('blackmail:pay'),myCoins<3);mkbtn(b,'⚔ Résister (perdre une carte)','ph-resist',()=>socket.emit('blackmail:resist'));}
-}
-
-function renderCroqueMortPanel(body, state) {
-  const ctx=state.croqueMortCtx; if(!ctx)return;
-  const myP=me(); const alreadyPassed=state.players.find(p=>p.id===myId)?.hasPassed;
-  const sec=document.createElement('div'); sec.className='phase-panel phase-croquemort';
-  sec.innerHTML=`<div class="phase-title">⚰️ Héritage disponible</div>
-    <div class="phase-desc"><strong>${ctx.deceasedName}</strong> est éliminé avec <strong>${ctx.coins} pièce(s)</strong>.<br>
-    Un joueur avec le Croque Mort peut en réclamer l'héritage !</div>
-    <div class="phase-btns" id="cm-btns"></div>`;
-  body.appendChild(sec);
-  if(!alreadyPassed&&!myP?.eliminated){
-    const b=sec.querySelector('#cm-btns');
-    mkbtn(b,'⚰️ Réclamer l\'héritage','ph-croquemort',()=>socket.emit('croquemort:claim'));
-    mkbtn(b,'Passer','ph-pass',()=>socket.emit('croquemort:pass'));
-  }
-}
-
-function mkbtn(parent,label,cls,cb,disabled=false){
-  const b=document.createElement('button');
-  b.className='ph-btn '+cls;
-  b.textContent=label;
-  b.disabled=disabled;
-  b.onclick=cb;
-  parent.appendChild(b);
-}
-
-// ── CONTROLS ──────────────────────────────────────────────────────────────────
-function createRoom(){
-  const n=document.getElementById('inp-name').value.trim();
-  if(!n){document.getElementById('home-err').textContent='Entrez votre nom.';return;}
-  document.getElementById('home-err').textContent='';
-  try{localStorage.setItem('complots_name',n);}catch(e){}
-  socket.emit('room:create',{name:n});
-}
-
-function joinRoom(){
-  const n=document.getElementById('inp-name').value.trim();
-  const c=document.getElementById('inp-code').value.trim().toUpperCase();
-  if(!n){document.getElementById('home-err').textContent='Entrez votre nom.';return;}
-  if(c.length!==4){document.getElementById('home-err').textContent='Code à 4 lettres requis.';return;}
-  document.getElementById('home-err').textContent='';
-  try{localStorage.setItem('complots_name',n);}catch(e){}
-  socket.emit('room:join',{code:c,name:n});
-}
-
-function startGame(){socket.emit('game:start');}
-function replayGame(){socket.emit('game:replay');}
-
-function goHome(){
-  try{localStorage.removeItem('complots_session');}catch(e){}
-  try{localStorage.removeItem('complots_name');}catch(e){}
-  location.reload();
-}
-
-function confirmAbandon() {
-  if (!confirm("Quitter la partie ?")) return;
-  socket.emit("room:leave");
-}
-
-// ── RULES MODAL ───────────────────────────────────────────────────────────────
-function openRules(){
-  document.getElementById('rules-modal').style.display='flex';
-  buildCardsGrid();
-}
-
-function closeRules(){document.getElementById('rules-modal').style.display='none';}
-
-function switchModalTab(tab){
-  document.getElementById('tab-rules').classList.toggle('active',tab==='rules');
-  document.getElementById('tab-cards').classList.toggle('active',tab==='cards');
-  document.getElementById('modal-rules-content').style.display=tab==='rules'?'':'none';
-  document.getElementById('modal-cards-content').style.display=tab==='cards'?'':'none';
-}
-
-function buildCardsGrid(){
-  const grid=document.getElementById('cards-grid');
-  if(grid.children.length>0)return;
-  const roster=gameState?.settings.roster||[];
-  const allCards=Object.keys(CHARS);
-  const ordered=[...roster,...allCards.filter(c=>!roster.includes(c))];
-  const seen=new Set();
-  ordered.forEach(c=>{
-    if(seen.has(c))return;seen.add(c);
-    const ch=CHARS[c]; const img=getCardImage(c);
-    const div=document.createElement('div'); div.className='card-info-item';
-    const inRoster=roster.includes(c)?'<span style="color:var(--gold);font-size:8px">★ En jeu</span>':'';
-    div.innerHTML=`${img?`<img class="card-info-img" src="${img}" alt="${c}">`:`<div class="card-info-img-placeholder card-art ${ch.css}">${ch.icon}</div>`}
-      <div class="card-info-body">
-        <div class="card-info-name">${ch.icon} ${c} ${inRoster}</div>
-        <div class="card-info-desc">${ch.short}</div>
-        <div class="card-info-type">${ch.css==='complots2'?'Complots 2':'Complots 1'}${ch.passive?' · Passif':''}</div>
-      </div>`;
-    grid.appendChild(div);
+    const playerId = 'p_' + Math.random().toString(36).slice(2, 8);
+    room.players.push({ id: playerId, name, socketId: socket.id, hand: [], revealed: [], coins: 0, eliminated: false });
+    socket.join(code);
+    socket.data = { roomCode: code, playerId };
+    socket.emit('room:joined', { roomCode: code, playerId });
+    broadcast(room);
   });
-}
 
-function leaveRoom() {
-  if (confirm("Voulez-vous vraiment quitter la salle ?")) {
-    socket.emit('room:leave');
-    try{localStorage.removeItem('complots_session');}catch(e){}
-    show('home');
-  }
-}
+  socket.on('room:settings', (settings) => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (room && room.host === playerId && !room.started) {
+      room.settings.turnDuration = Math.max(5, Math.min(60, settings.turnDuration));
+      room.settings.type = settings.type;
+      room.settings.preset = settings.preset;
+      room.settings.roster = settings.roster;
+      broadcast(room);
+    }
+  });
+
+  socket.on('game:start', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.host !== playerId) return;
+    if (room.players.length < 3) return socket.emit('error', 'Il faut au moins 3 joueurs.');
+
+    // Mélanger l'ordre des joueurs aléatoirement à chaque partie
+    shuffle(room.players);
+
+    room.deck = buildDeck(room.players.length, room.settings.roster);
+    room.treasury = 50;
+    room.players.forEach(p => {
+      p.hand = [room.deck.pop(), room.deck.pop()];
+      p.coins = 2; p.eliminated = false; p.revealed = [];
+      room.treasury -= 2;
+    });
+    room.currentPlayerId = room.players[0].id;
+    room.started = true;
+    room.phase = 'action';
+    room.log = ['🎲 La partie commence !'];
+    broadcast(room);
+  });
+
+  socket.on('action:do', ({ actionId, targetId }) => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'action' || room.currentPlayerId !== playerId) return;
+
+    const actor = playerById(room, playerId);
+    const target = targetId ? playerById(room, targetId) : null;
+
+    if (actionId === 'coup' && actor.coins < 7) return;
+    if (actionId === 'assassinate' && actor.coins < 3) return;
+    if (actionId === 'blackmail' && actor.coins < 0) return; // pas de coût
+    if (actor.coins >= 10 && actionId !== 'coup') return socket.emit('error', 'Coup d\'état obligatoire (10+ pièces).');
+
+    // Calculer les bloqueurs disponibles filtrés par le roster actuel
+    const blockableChars = (BLOCKABLE_BY[actionId] || []).filter(c => room.settings.roster.includes(c));
+    const contestable = !NON_CONTESTABLE.includes(actionId);
+
+    // Actions ciblées : seule la cible peut bloquer
+    const targetOnlyActions = ['steal', 'assassinate', 'spy', 'tithe', 'blackmail'];
+    const blockTargetOnly = targetOnlyActions.includes(actionId) && !!targetId;
+
+    room.pendingAction = {
+      id: actionId,
+      actorId: playerId,
+      targetId: targetId || null,
+      blockableBy: blockableChars,
+      contestable,
+      blockTargetOnly,
+    };
+
+    const uncontestable = ['income', 'coup'];
+    if (uncontestable.includes(actionId)) {
+      return resolveAction(room);
+    }
+
+    room.phase = 'challenge';
+    // L'acteur passe automatiquement ; pour les actions ciblées, les non-cibles auto-passent aussi (ils ne peuvent pas bloquer)
+    const autoPass = [playerId];
+    if (blockTargetOnly) {
+      // Les joueurs qui ne sont ni acteur ni cible ne peuvent pas bloquer -> auto-pass pour le compte de passe
+      // Ils peuvent toujours contester côté client, mais on les comptabilise deja comme passes pour le blocage
+      alivePlayers(room).forEach(p => {
+        if (p.id !== playerId && p.id !== (targetId || null) && !autoPass.includes(p.id)) {
+          autoPass.push(p.id);
+        }
+      });
+    }
+    room.passedPlayers = autoPass;
+    addLog(room, `⚡ ${actor.name} déclare : ${actionId}${target ? ' → ' + target.name : ''}`);
+
+    const duration = room.settings.turnDuration * 1000;
+    room.timerDuration = duration;
+    room.timerEnd = Date.now() + duration;
+    room.timer = setTimeout(() => { resolveAction(room); }, duration);
+
+    broadcast(room);
+  });
+
+  socket.on('challenge:pass', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || (room.phase !== 'challenge' && room.phase !== 'block_challenge')) return;
+
+    if (!room.passedPlayers.includes(playerId)) {
+      room.passedPlayers.push(playerId);
+      const alive = alivePlayers(room).length;
+
+      if (room.passedPlayers.length >= alive) {
+        if (room.phase === 'challenge') resolveAction(room);
+        else if (room.phase === 'block_challenge') {
+          clearRoomTimer(room);
+          addLog(room, `🛡 Blocage accepté. Action annulée.`);
+          room.pendingAction = null;
+          room.challengeCtx = null;
+          nextTurn(room);
+        }
+      } else {
+        broadcast(room);
+      }
+    }
+  });
+
+  socket.on('challenge:contest', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'challenge') return;
+
+    clearRoomTimer(room);
+    const challenger = playerById(room, playerId);
+    const actor = playerById(room, room.pendingAction.actorId);
+
+    // Vérifier si l'acteur possède bien un personnage valide pour cette action
+    const validChars = ACTION_VALID_CHARS[room.pendingAction.id] || [];
+    const validChar = validChars.find(c => actor.hand.includes(c));
+
+    if (validChar) {
+      // Le contestataire avait tort
+      addLog(room, `❌ ${challenger.name} se trompe ! ${actor.name} avait bien le : ${validChar}.`);
+      const idx = actor.hand.indexOf(validChar);
+      actor.hand.splice(idx, 1);
+      room.deck.push(validChar);
+      shuffle(room.deck);
+      const newCard1 = room.deck.pop();
+      actor.hand.push(newCard1);
+      addLog(room, `\U0001f0cf ${actor.name} pioche une nouvelle carte apr\u00e8s avoir prouv\u00e9 sa carte.`);
+      loseCard(room, challenger.id, undefined, () => resolveAction(room));
+    } else {
+      addLog(room, `🚨 MENTEUR ! ${challenger.name} démasque ${actor.name}. Action annulée.`);
+      loseCard(room, actor.id, undefined, () => { if (!checkWin(room)) nextTurn(room); });
+    }
+  });
+
+  socket.on('challenge:block', ({ blockChar }) => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'challenge') return;
+
+    clearRoomTimer(room);
+    const blocker = playerById(room, playerId);
+    const actor = playerById(room, room.pendingAction.actorId);
+
+    addLog(room, `🛡 ${blocker.name} bloque avec ${blockChar} !`);
+
+    room.challengeCtx = { blockerId: playerId, blockChar, originalAction: room.pendingAction };
+    room.pendingAction = { ...room.pendingAction, actorId: playerId };
+    room.phase = 'block_challenge';
+
+    // Seul l'acteur original peut contester le bloc — les autres passent d'office
+    room.passedPlayers = alivePlayers(room).filter(p => p.id !== actor.id).map(p => p.id);
+
+    const duration = room.settings.turnDuration * 1000;
+    room.timerDuration = duration;
+    room.timerEnd = Date.now() + duration;
+    room.timer = setTimeout(() => {
+      clearRoomTimer(room);
+      addLog(room, `⏳ Temps écoulé. Blocage accepté.`);
+      room.pendingAction = null;
+      room.challengeCtx = null;
+      nextTurn(room);
+    }, duration);
+
+    broadcast(room);
+  });
+
+  socket.on('block:contest', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'block_challenge') return;
+    if (room.challengeCtx.originalAction.actorId !== playerId) return;
+
+    clearRoomTimer(room);
+    const blocker = playerById(room, room.challengeCtx.blockerId);
+    const actor = playerById(room, playerId);
+    const blockChar = room.challengeCtx.blockChar;
+    const origAction = room.challengeCtx.originalAction;
+
+    if (blocker.hand.includes(blockChar)) {
+      addLog(room, `❌ ${actor.name} conteste à tort ! ${blocker.name} avait bien ${blockChar}.`);
+      const idx = blocker.hand.indexOf(blockChar);
+      blocker.hand.splice(idx, 1);
+      room.deck.push(blockChar);
+      shuffle(room.deck);
+      const newCard2 = room.deck.pop();
+      blocker.hand.push(newCard2);
+      addLog(room, `\U0001f0cf ${blocker.name} pioche une nouvelle carte apr\u00e8s avoir prouv\u00e9 sa carte.`);
+      room.pendingAction = null; room.challengeCtx = null;
+      loseCard(room, actor.id, undefined, () => { if (!checkWin(room)) nextTurn(room); });
+    } else {
+      addLog(room, `🚨 MENTEUR ! ${blocker.name} bluffait. L'action originale continue.`);
+      room.pendingAction = origAction;
+      room.challengeCtx = null;
+      loseCard(room, blocker.id, undefined, () => resolveAction(room));
+    }
+  });
+
+  socket.on('pick:card', ({ index }) => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'pick' || !room.pickCtx || room.pickCtx.playerId !== playerId) return;
+
+    const cb = room.pickCtx.cb;
+    room.pickCtx = null;
+    room.phase = 'action';
+    loseCard(room, playerId, index, cb);
+  });
+
+  socket.on('exchange:pick', ({ kept }) => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'exchange' || !room.exchangeCtx || room.exchangeCtx.playerId !== playerId) return;
+
+    const actor = playerById(room, playerId);
+    const { options, keepCount } = room.exchangeCtx;
+    if (kept.length !== keepCount) return;
+
+    actor.hand = kept.map(i => options[i]);
+    const discarded = options.filter((_, i) => !kept.includes(i));
+    discarded.forEach(c => room.deck.push(c));
+    shuffle(room.deck);
+
+    addLog(room, `🔄 ${actor.name} a mis à jour sa main.`);
+    room.exchangeCtx = null;
+    nextTurn(room);
+  });
+
+  // ── Espion : acquittement après avoir vu la carte ─────────────────────────
+  socket.on('spy:ack', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'spy_reveal' || !room.spyCtx || room.spyCtx.spyId !== playerId) return;
+    clearRoomTimer(room);
+    room.spyCtx = null;
+    nextTurn(room);
+  });
+
+  // ── Maître Chanteur : réponse de la cible ─────────────────────────────────
+  socket.on('blackmail:pay', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'blackmail_response' || !room.blackmailCtx || room.blackmailCtx.targetId !== playerId) return;
+
+    clearRoomTimer(room);
+    const target = playerById(room, playerId);
+    if (target.coins < 3) return socket.emit('error', 'Pas assez de pièces pour payer (3 requis).');
+
+    target.coins -= 3;
+    room.treasury += 3;
+    addLog(room, `📜 ${target.name} paie 3 pièces (chantage accepté).`);
+    room.blackmailCtx = null;
+    room.pendingAction = null;
+    nextTurn(room);
+  });
+
+  socket.on('blackmail:resist', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'blackmail_response' || !room.blackmailCtx || room.blackmailCtx.targetId !== playerId) return;
+
+    clearRoomTimer(room);
+    const target = playerById(room, playerId);
+    addLog(room, `⚔️ ${target.name} résiste au chantage et perd une carte !`);
+    const ctx = room.blackmailCtx;
+    room.blackmailCtx = null;
+    room.pendingAction = null;
+    loseCard(room, target.id, undefined, () => { if (!checkWin(room)) nextTurn(room); });
+  });
+
+  // ── Croque Mort : réclamation de l'héritage ───────────────────────────────
+  socket.on('croquemort:claim', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'croque_mort' || !room.croqueMortCtx) return;
+    if (room.croqueMortCtx.claimerId) return; // quelqu'un a deja reclame
+
+    const claimer = playerById(room, playerId);
+    const ctx = room.croqueMortCtx;
+
+    // Enregistrer le reclamant et attendre la reponse des autres
+    ctx.claimerId = playerId;
+    ctx.claimerName = claimer.name;
+    ctx.contestPassedPlayers = [];
+    // Recharger le timer pour la phase de contestation
+    clearRoomTimer(room);
+    const duration = Math.min(room.settings.turnDuration * 1000, 15000);
+    room.timerDuration = duration;
+    room.timerEnd = Date.now() + duration;
+    room.timer = setTimeout(() => {
+      // Personne n'a conteste : le reclamant reussit
+      clearRoomTimer(room);
+      const c = room.croqueMortCtx;
+      if (!c) return;
+      const claimerP = playerById(room, c.claimerId);
+      if (claimerP && claimerP.hand.includes('Croque Mort')) {
+        claimerP.coins += c.coins;
+        addLog(room, `\u26b0\ufe0f ${claimerP.name} (Croque Mort) r\u00e9cup\u00e8re ${c.coins} pi\u00e8ce(s) de ${c.deceasedName}.`);
+      } else {
+        // Bluff non conteste : il prend quand meme (personne n'a verifie)
+        if (claimerP) { claimerP.coins += c.coins; }
+        addLog(room, `\u26b0\ufe0f ${claimerP?.name} r\u00e9clame l'h\u00e9ritage sans contestation (+${c.coins} pi\u00e8ces).`);
+      }
+      const savedCb = c.cb;
+      room.croqueMortCtx = null;
+      if (savedCb) savedCb();
+    }, duration);
+    addLog(room, `\u26b0\ufe0f ${claimer.name} r\u00e9clame l'h\u00e9ritage du Croque Mort !`);
+    broadcast(room);
+  });
+
+  socket.on('croquemort:contest', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'croque_mort' || !room.croqueMortCtx?.claimerId) return;
+    if (playerId === room.croqueMortCtx.claimerId) return; // ne peut pas se contester soi-meme
+
+    clearRoomTimer(room);
+    const ctx = room.croqueMortCtx;
+    const claimer = playerById(room, ctx.claimerId);
+
+    if (claimer.hand.includes('Croque Mort')) {
+      // Le reclamant avait vraiment le Croque Mort : le contestataire perd une carte
+      addLog(room, `\u274c ${playerById(room,playerId).name} conteste \u00e0 tort ! ${claimer.name} avait bien le Croque Mort.`);
+      claimer.coins += ctx.coins;
+      addLog(room, `\u26b0\ufe0f ${claimer.name} r\u00e9cup\u00e8re ${ctx.coins} pi\u00e8ce(s).`);
+      const savedCb = ctx.cb;
+      room.croqueMortCtx = null;
+      loseCard(room, playerId, undefined, () => { if (savedCb) savedCb(); });
+    } else {
+      // Bluff demasque : le reclamant perd une carte, les pieces au tresor
+      addLog(room, `\ud83d\udea8 MENTEUR ! ${playerById(room,playerId).name} d\u00e9masque ${claimer.name} ! Pas de Croque Mort.`);
+      room.treasury += ctx.coins;
+      addLog(room, `\u26b0\ufe0f L'h\u00e9ritage de ${ctx.deceasedName} retourne au tr\u00e9sor.`);
+      const savedCb = ctx.cb;
+      room.croqueMortCtx = null;
+      loseCard(room, ctx.claimerId, undefined, () => { if (savedCb) savedCb(); });
+    }
+  });
+
+  socket.on('croquemort:pass', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'croque_mort' || !room.croqueMortCtx) return;
+
+    if (!room.passedPlayers.includes(playerId)) {
+      room.passedPlayers.push(playerId);
+      const alive = alivePlayers(room).length;
+      if (room.passedPlayers.length >= alive) {
+        clearRoomTimer(room);
+        room.treasury += room.croqueMortCtx.coins;
+        addLog(room, `⚰️ L'héritage retourne au trésor.`);
+        const savedCb = room.croqueMortCtx.cb;
+        room.croqueMortCtx = null;
+        if (savedCb) savedCb();
+      } else {
+        broadcast(room);
+      }
+    }
+  });
+
+socket.on('game:replay', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room || room.host !== playerId) return;
+
+    // Mélanger l'ordre des joueurs aléatoirement pour la revanche
+    shuffle(room.players);
+
+    // Reset complet de l'état de la partie
+    room.started = false;
+    room.phase = 'lobby';
+    room.deck = [];
+    room.treasury = 0;
+    room.currentPlayerId = null;
+    room.log = [];
+    room.pendingAction = null;
+    room.challengeCtx = null;
+    room.passedPlayers = [];
+    room.pickCtx = null;
+    room.exchangeCtx = null;
+    room.spyCtx = null;
+    room.blackmailCtx = null;
+    room.croqueMortCtx = null;
+    room.winnerId = null;
+    if (room.timer) { clearTimeout(room.timer); room.timer = null; }
+    room.timerEnd = null;
+
+    // Reset de chaque joueur
+    room.players.forEach(p => {
+      p.hand = [];
+      p.revealed = [];
+      p.coins = 0;
+      p.eliminated = false;
+    });
+
+    broadcast(room);
+  });
+
+  // 🛠️ FIX 1: Added the missing event listener header for this block
+  socket.on('room:reconnect', ({ rc, playerId }) => {
+    const room = rooms[rc];
+    if (!room) return socket.emit('error', 'Salle introuvable ou expirée.');
+    const p = playerById(room, playerId);
+    if (!p) return socket.emit('error', 'Joueur introuvable dans cette salle.');
+    p.socketId = socket.id;
+    socket.join(rc);
+    socket.data = { roomCode: rc, playerId };
+    socket.emit('room:joined', { roomCode: rc, playerId });
+    broadcast(room);
+  });
+
+  socket.on('disconnect', () => {
+    const { roomCode, playerId } = socket.data || {};
+    if (!roomCode || !rooms[roomCode]) return;
+    const room = rooms[roomCode];
+    const p = playerById(room, playerId);
+    if (p) addLog(room, `🔌 ${p.name} est hors ligne.`);
+    broadcast(room);
+  });
+
+  socket.on('room:leave', () => {
+    const { roomCode, playerId } = socket.data || {};
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    const wasHost = room.host === playerId;
+
+    if (room.started) {
+      // En partie : eliminer le joueur et gerer le tour
+      const player = playerById(room, playerId);
+      if (player && !player.eliminated) {
+        player.eliminated = true;
+        addLog(room, `🏳 ${player.name} abandonne la partie.`);
+        if (room.currentPlayerId === playerId) {
+          clearRoomTimer(room);
+          room.pendingAction = null; room.challengeCtx = null;
+          room.pickCtx = null; room.exchangeCtx = null;
+          room.spyCtx = null; room.blackmailCtx = null;
+          room.croqueMortCtx = null; room.passedPlayers = [];
+          if (!checkWin(room)) nextTurn(room);
+          return;
+        }
+        // Si tous les vivants restants ont passe, resoudre
+        if (room.phase === 'challenge' || room.phase === 'block_challenge') {
+          const alive = alivePlayers(room);
+          const passedAlive = room.passedPlayers.filter(id => alive.find(p => p.id === id));
+          if (passedAlive.length >= alive.length) {
+            if (room.phase === 'challenge') { resolveAction(room); return; }
+            else { clearRoomTimer(room); room.pendingAction = null; room.challengeCtx = null; nextTurn(room); return; }
+          }
+        }
+      }
+      if (wasHost) {
+        const stillAlive = room.players.find(p => !p.eliminated);
+        if (stillAlive) room.host = stillAlive.id;
+      }
+      if (!checkWin(room)) broadcast(room);
+    } else {
+      // En lobby : retirer completement
+      room.players = room.players.filter(p => p.id !== playerId);
+      if (wasHost && room.players.length > 0) room.host = room.players[0].id;
+      if (room.players.length === 0) { delete rooms[roomCode]; return; }
+      broadcast(room);
+    }
+  });
+
+}); // 🛠️ FIX 2: Properly close the main io.on('connection', ...) block here
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Serveur Complots en écoute sur le port ${PORT}`));
+// 🛠️ FIX 3: Removed the stray closing brace '}' that was at the end of the file
