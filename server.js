@@ -12,8 +12,7 @@ const rooms = {};
 // Dictionnaire complet des personnages
 const ALL_CHARACTERS = {
   // Complots 1
-  'Duchesse':       { icon: '♛', type: 'complots2', short: 'Taxes · Bloque aide étrangère' },
-  'Duc':            { icon: '♛', type: 'classic',   short: 'Taxes · Bloque aide étrangère' },
+  'Duchesse':       { icon: '♛', type: 'classic',   short: 'Taxes · Bloque aide étrangère' },
   'Assassin':       { icon: '☽', type: 'classic',   short: 'Assassine pour 3 pièces' },
   'Comtesse':       { icon: '❦', type: 'classic',   short: 'Bloque l\'Assassin/Bourreau' },
   'Capitaine':      { icon: '⚓', type: 'classic',   short: 'Vole 2 pièces · Bloque Vol' },
@@ -33,7 +32,7 @@ const ALL_CHARACTERS = {
 
 // Personnages valides par action (pour les contestations)
 const ACTION_VALID_CHARS = {
-  'tax':        ['Duc', 'Duchesse'],
+  'tax':        ['Duchesse'],
   'steal':      ['Capitaine', 'Justicier'],
   'assassinate':['Assassin', 'Bourreau'],
   'exchange':   ['Ambassadeur', 'Inquisiteur'],
@@ -46,7 +45,7 @@ const ACTION_VALID_CHARS = {
 
 // Actions pouvant être bloquées et par quel(s) personnage(s)
 const BLOCKABLE_BY = {
-  'foreign_aid': ['Duc', 'Duchesse', 'Illusionniste'],
+  'foreign_aid': ['Duchesse', 'Illusionniste'],
   'steal':       ['Capitaine', 'Ambassadeur', 'Inquisiteur', 'Justicier'],
   'assassinate': ['Comtesse', 'Croque Mort'],
   'spy':         [],
@@ -410,7 +409,7 @@ io.on('connection', (socket) => {
         turnDuration: 10,
         type: 'classic',
         preset: '1',
-        roster: ['Duc', 'Assassin', 'Comtesse', 'Capitaine', 'Ambassadeur']
+        roster: ['Duchesse', 'Assassin', 'Comtesse', 'Capitaine', 'Ambassadeur']
       },
       timerDuration: 10000,
       players: [{ id: playerId, name, socketId: socket.id, hand: [], revealed: [], coins: 0, eliminated: false }],
