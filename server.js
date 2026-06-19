@@ -1,7 +1,5 @@
 const express = require('express');
 const http    = require('http');
-const fs      = require('fs');
-const path    = require('path');
 const { Server } = require('socket.io');
 const cors    = require('cors');
 
@@ -15,24 +13,14 @@ app.use(cors());
 app.get('/', (_req, res) => res.send('Skyjo Server OK'));
 
 // ─────────────────────────────────────────────
-// SKINS — liste des dossiers présents dans ./image/
-// (le dossier image/ doit être poussé sur le repo Git du serveur,
-//  au même niveau que server.js, avec un sous-dossier par skin)
+// SKINS — liste codée en dur (doit correspondre EXACTEMENT
+// aux noms des sous-dossiers présents dans image/ côté frontend)
+// Pour ajouter un skin : ajoute simplement son nom dans ce tableau.
 // ─────────────────────────────────────────────
-const IMAGE_DIR = path.join(__dirname, 'image');
+const SKINS = ['Disney', 'Pokemon'];
 
 app.get('/api/skins', (_req, res) => {
-  try {
-    if (!fs.existsSync(IMAGE_DIR)) return res.json([]);
-    const skins = fs.readdirSync(IMAGE_DIR, { withFileTypes: true })
-      .filter(entry => entry.isDirectory())
-      .map(entry => entry.name)
-      .sort((a, b) => a.localeCompare(b));
-    res.json(skins);
-  } catch (e) {
-    console.error('api/skins error', e.message);
-    res.json([]);
-  }
+  res.json(SKINS);
 });
 
 // ─────────────────────────────────────────────
