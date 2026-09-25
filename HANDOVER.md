@@ -120,7 +120,6 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 
 ## 5. À faire
 
-- [ ] Ajouter l'interface de discussion au client Skyjo (le serveur la gère déjà).
 - [ ] L'utilisateur doit envoyer en SFTP `public/complots/` + `public/_commun/`
       (l'ancien client Complots en ligne ne marche plus avec le serveur poussé),
       et `public/skyjo/`, `public/incanGold/`, `public/Wavelength/`,
