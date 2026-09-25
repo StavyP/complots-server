@@ -7,4 +7,5 @@ module.exports = [
   require('./wavelength'),
   require('./traitres'),
   require('./7wonders'),
+  require('./duel'),
 ];

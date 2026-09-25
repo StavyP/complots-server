@@ -3,7 +3,7 @@
 // dépôt GitHub StavyP/complots-server, adresse complots-server.onrender.com).
 //
 // Chaque jeu vit dans son propre espace Socket.IO : /complots, /skyjo,
-// /incan, /wavelength, /traitres, /7wonders. Voir lib/salles.js pour le
+// /incan, /wavelength, /traitres, /7wonders, /duel. Voir lib/salles.js pour le
 // protocole commun et jeux/*.js pour les règles de chaque jeu.
 const express = require('express');
 const http = require('http');

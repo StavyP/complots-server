@@ -4,7 +4,7 @@
 > à mettre à jour avant de terminer.** Voir le protocole dans le
 > [CLAUDE.md](../CLAUDE.md) de l'espace de travail.
 >
-> Dernière mise à jour : **2026-09-25** (création : fusion des serveurs)
+> Dernière mise à jour : **2026-09-25** (7 Wonders Duel ajouté)
 
 ---
 
@@ -12,7 +12,7 @@
 
 | | |
 |---|---|
-| Rôle | **Un seul** serveur Node (Express + Socket.IO) pour tous les jeux en ligne. Chaque jeu = un espace Socket.IO : `/complots`, `/skyjo`, `/incan`, `/wavelength`, `/traitres`, `/7wonders` |
+| Rôle | **Un seul** serveur Node (Express + Socket.IO) pour tous les jeux en ligne. Chaque jeu = un espace Socket.IO : `/complots`, `/skyjo`, `/incan`, `/wavelength`, `/traitres`, `/7wonders`, `/duel` |
 | Hébergement | **Render**, `https://complots-server.onrender.com` (nom historique gardé : les clients déjà en ligne le connaissent) |
 | Mise en ligne | Render est relié au dépôt GitHub **`https://github.com/StavyP/complots-server.git`** (branche `main`) ; tout push redéploie seul ; démarrage `node server.js`, port via `PORT` |
 | Clients | Pages statiques sur IONOS (`public/<jeu>/`). L'URL du serveur est dans **`public/_commun/config.js`** (une ligne pour tous) |
@@ -93,7 +93,7 @@ par chaque jeu (identité visuelle propre). Complots n'utilise pas ce kit
 | Wavelength | `/wavelength` | **Fait** le 2026-09-25 : `jeux/wavelength.js` (+ `wavelength-cartes.js`), tests + fuzz, client `public/Wavelength/` |
 | Traîtres à bord | `/traitres` | **Fait** le 2026-09-25 : `jeux/traitres.js`, tests + fuzz, client `public/traitres/` |
 | 7 Wonders (édition 2020) | `/7wonders` | **Fait** le 2026-09-25 : `jeux/7wonders.js` (+ catalogue généré, noms), tests + fuzz, client `public/7wonders/` |
-| 7 Wonders Duel | à créer | Demandé le 2026-09-25, pas commencé |
+| 7 Wonders Duel | `/duel` | **Fait** le 2026-09-25 : `jeux/duel.js` + `jeux/duel-cartes.js`, tests `duel.test.js` + fuzz, client `public/7wonders-duel/` |
 
 Tant qu'un jeu n'est pas dans `jeux/index.js`, son espace n'existe pas ici ;
 son ancien client continue de viser son ancien serveur Render (voir §1).
@@ -101,12 +101,12 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 ## 4. Vérifié / pas vérifié
 
 **Vérifié le 2026-09-25** (local, `PORT=3100 node server.js`) :
-- `npm test` : 143/143 (Complots : 30 scénarios + fuzz 400 parties ; Skyjo :
+- `npm test` : 173/173 (Complots : 30 scénarios + fuzz 400 parties ; Skyjo :
   25 + fuzz 300 ; Incan Gold : 17 + fuzz 400 ; Wavelength : 20 + fuzz 400 ;
-  Traîtres : 19 + fuzz 500 ; 7 Wonders : 26 + fuzz 150 ; avec déconnexions
-  et départs).
-- De bout en bout (3-4 navigateurs) : `public/<jeu>/_banc-essai/partie.py`
-  pour skyjo, incanGold, Wavelength, traitres, 7wonders.
+  Traîtres : 19 + fuzz 500 ; 7 Wonders : 26 + fuzz 150 ; 7 Wonders Duel :
+  29 + fuzz 300 ; avec déconnexions et départs).
+- De bout en bout (2-4 navigateurs) : `public/<jeu>/_banc-essai/partie.py`
+  pour skyjo, incanGold, Wavelength, traitres, 7wonders, 7wonders-duel.
 - Complots de bout en bout (Playwright, 3 navigateurs) : partie complète,
   F5 → retour à la table, abandon → victoire, revanche.
 - `GET /` et `GET /salle/:code` depuis l'accueil (autre origine) : OK.
@@ -120,12 +120,12 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 
 ## 5. À faire
 
-- [ ] 7 Wonders Duel (nouveau jeu à 2 joueurs).
 - [ ] Ajouter l'interface de discussion au client Skyjo (le serveur la gère déjà).
 - [ ] L'utilisateur doit envoyer en SFTP `public/complots/` + `public/_commun/`
       (l'ancien client Complots en ligne ne marche plus avec le serveur poussé),
       et `public/skyjo/`, `public/incanGold/`, `public/Wavelength/`,
-      `public/traitres/`, `public/7wonders/` pour les nouveaux clients (les
+      `public/traitres/`, `public/7wonders/`, `public/7wonders-duel/` (nouveau)
+      et `public/_accueil/` (fiche du Duel) pour les nouveaux clients (les
       anciens visent encore leurs anciens serveurs). NB : la synchro SFTP de
       VS Code est automatique (voir CLAUDE.md) — c'est peut-être déjà fait.
 - [ ] Render a mis longtemps à suivre les push le 2026-09-25 (resté un
@@ -146,6 +146,16 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 ---
 
 ## Journal
+
+### 2026-09-25 — 7 Wonders Duel ajouté
+
+- `jeux/duel.js` (espace `/duel`, 2 joueurs, `DuelRoom extends Salle`),
+  `jeux/duel-cartes.js` (données vérifiées sur la règle et le matériel
+  officiels, voir `public/7wonders-duel/HANDOVER.md`), `GET /donnees/duel`.
+- Départ en partie = victoire de l'autre (« abandon ») ; adversaire
+  déconnecté depuis 60 s → `game:forfait` permet de réclamer la victoire.
+- Tests : `tests/duel.test.js` (29) + `tests/duel-fuzz.test.js` (300 parties,
+  les trois fins de partie apparaissent). `npm test` : 173/173.
 
 ### 2026-09-25 — 7 Wonders (édition 2020) migré
 
