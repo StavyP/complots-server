@@ -132,12 +132,11 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
       redéploiement automatique ou déploiement manuel de l'utilisateur :
       inconnu. Si un push n'apparaît pas sur `GET /`, lui dire « Manual
       Deploy → Deploy latest commit ».
-      **Constat du 2026-09-25 (fin de journée)** : Render sert toujours
-      `3abf9a2` (Traîtres) malgré les push `b0836be` (7 Wonders), `8091270`
-      (Duel) et `db4a47a` (doc). Un clone neuf du dépôt + `npm ci` +
-      `node server.js` démarre bien avec les 7 jeux → le code est bon, le
-      blocage est côté Render (déploiement auto désactivé ou en échec :
-      regarder l'onglet « Events » du service).
+      **Constat du 2026-09-25 (fin de journée)** : Render a servi `3abf9a2`
+      (Traîtres) pendant plus d'une heure après les push `b0836be`
+      (7 Wonders) et `8091270` (Duel), puis s'est mis à jour seul : `GET /`
+      liste les 7 jeux. Simple délai, pas une panne (un clone neuf + `npm ci`
+      démarrait déjà bien). Avant d'accuser le code, attendre ou « Manual Deploy ».
 
 ## 6. Décisions de l'utilisateur — ne pas défaire
 
