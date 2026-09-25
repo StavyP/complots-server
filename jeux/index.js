@@ -4,4 +4,5 @@ module.exports = [
   require('./complots'),
   require('./skyjo'),
   require('./incan'),
+  require('./wavelength'),
 ];

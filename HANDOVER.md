@@ -90,7 +90,7 @@ par chaque jeu (identité visuelle propre). Complots n'utilise pas ce kit
 | Complots | `/complots` | **Fait** (moteur refondu le 2026-09-24, migré ici le 2026-09-25) |
 | Skyjo | `/skyjo` | **Fait** le 2026-09-25 : `jeux/skyjo.js` (hérite de `Salle`), tests `skyjo.test.js` + fuzz, client `public/skyjo/` |
 | Incan Gold | `/incan` | **Fait** le 2026-09-25 : `jeux/incan.js`, tests `incan.test.js` + fuzz, client `public/incanGold/` |
-| Wavelength | `/wavelength` | à refaire |
+| Wavelength | `/wavelength` | **Fait** le 2026-09-25 : `jeux/wavelength.js` (+ `wavelength-cartes.js`), tests + fuzz, client `public/Wavelength/` |
 | Traîtres à bord | `/traitres` | à refaire |
 | 7 Wonders | `/7wonders` | à refaire |
 
@@ -100,11 +100,11 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 ## 4. Vérifié / pas vérifié
 
 **Vérifié le 2026-09-25** (local, `PORT=3100 node server.js`) :
-- `npm test` : 75/75 (Complots : 30 scénarios + fuzz 400 parties ; Skyjo :
-  25 scénarios + fuzz 300 parties ; Incan Gold : 17 scénarios + fuzz 400
-  parties ; avec déconnexions et départs).
-- De bout en bout (3 navigateurs) : `public/skyjo/_banc-essai/partie.py`,
-  `public/incanGold/_banc-essai/partie.py`.
+- `npm test` : 96/96 (Complots : 30 scénarios + fuzz 400 parties ; Skyjo :
+  25 + fuzz 300 ; Incan Gold : 17 + fuzz 400 ; Wavelength : 20 + fuzz 400 ;
+  avec déconnexions et départs).
+- De bout en bout (3-4 navigateurs) : `public/skyjo/_banc-essai/partie.py`,
+  `public/incanGold/_banc-essai/partie.py`, `public/Wavelength/_banc-essai/partie.py`.
 - Complots de bout en bout (Playwright, 3 navigateurs) : partie complète,
   F5 → retour à la table, abandon → victoire, revanche.
 - `GET /` et `GET /salle/:code` depuis l'accueil (autre origine) : OK.
@@ -117,12 +117,12 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 
 ## 5. À faire
 
-- [ ] Migrer Wavelength, Traîtres, 7 Wonders.
+- [ ] Migrer Traîtres, 7 Wonders.
 - [ ] Ajouter l'interface de discussion au client Skyjo (le serveur la gère déjà).
 - [ ] L'utilisateur doit envoyer en SFTP `public/complots/` + `public/_commun/`
       (l'ancien client Complots en ligne ne marche plus avec le serveur poussé),
-      et `public/skyjo/`, `public/incanGold/` pour les nouveaux clients (les anciens
-      visent encore `skijo-server` / `incan-server` et marchent toujours).
+      et `public/skyjo/`, `public/incanGold/`, `public/Wavelength/` pour les
+      nouveaux clients (les anciens visent encore leurs anciens serveurs).
 
 ## 6. Décisions de l'utilisateur — ne pas défaire
 
@@ -136,6 +136,12 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 ---
 
 ## Journal
+
+### 2026-09-25 — Wavelength migré
+
+- `jeux/wavelength.js` + `jeux/wavelength-cartes.js` + tests. Méthodes
+  d'action utilisables au salon (`actTeam`) : `Salle` ne bloque rien, c'est
+  au jeu de vérifier `this.started`.
 
 ### 2026-09-25 — Incan Gold migré ; discussion commune
 
