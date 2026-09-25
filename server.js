@@ -39,6 +39,16 @@ app.get('/salle/:code', (req, res) => {
   res.json({ ok: true, jeu });
 });
 
+// Données statiques d'un jeu (cartes, merveilles…) pour l'affichage côté
+// client : une seule source, celle du moteur. Mises en cache une heure.
+app.get('/donnees/:jeu', (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const jeu = JEUX.find((j) => j.id === req.params.jeu);
+  if (!jeu || !jeu.donnees) return res.status(404).json({ ok: false });
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.json(jeu.donnees);
+});
+
 process.on('uncaughtException', (err) => console.error('uncaughtException:', err));
 process.on('unhandledRejection', (reason) => console.error('unhandledRejection:', reason));
 

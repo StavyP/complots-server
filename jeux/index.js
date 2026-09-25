@@ -6,4 +6,5 @@ module.exports = [
   require('./incan'),
   require('./wavelength'),
   require('./traitres'),
+  require('./7wonders'),
 ];

@@ -25,7 +25,7 @@ le rendu. » Procédure (l'espace n'est pas un dépôt git, on passe par un clon
 
 1. `git clone https://github.com/StavyP/complots-server.git` dans le scratchpad.
 2. Y copier `server.js`, `package.json`, `package-lock.json`, `.gitignore`,
-   `HANDOVER.md`, `lib/`, `jeux/`, `tests/` — **jamais `node_modules/`**.
+   `HANDOVER.md`, `lib/`, `jeux/`, `tests/`, `outils/` — **jamais `node_modules/`**.
    (Le dossier `image/` du dépôt est un reste de l'ancien Complots : inutile, laissé.)
 3. `npm test` dans `server/` avant de committer ; commit ; `git push origin main`
    (Git Credential Manager a déjà les droits).
@@ -92,7 +92,8 @@ par chaque jeu (identité visuelle propre). Complots n'utilise pas ce kit
 | Incan Gold | `/incan` | **Fait** le 2026-09-25 : `jeux/incan.js`, tests `incan.test.js` + fuzz, client `public/incanGold/` |
 | Wavelength | `/wavelength` | **Fait** le 2026-09-25 : `jeux/wavelength.js` (+ `wavelength-cartes.js`), tests + fuzz, client `public/Wavelength/` |
 | Traîtres à bord | `/traitres` | **Fait** le 2026-09-25 : `jeux/traitres.js`, tests + fuzz, client `public/traitres/` |
-| 7 Wonders | `/7wonders` | à refaire |
+| 7 Wonders (édition 2020) | `/7wonders` | **Fait** le 2026-09-25 : `jeux/7wonders.js` (+ catalogue généré, noms), tests + fuzz, client `public/7wonders/` |
+| 7 Wonders Duel | à créer | Demandé le 2026-09-25, pas commencé |
 
 Tant qu'un jeu n'est pas dans `jeux/index.js`, son espace n'existe pas ici ;
 son ancien client continue de viser son ancien serveur Render (voir §1).
@@ -100,14 +101,16 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 ## 4. Vérifié / pas vérifié
 
 **Vérifié le 2026-09-25** (local, `PORT=3100 node server.js`) :
-- `npm test` : 116/116 (Complots : 30 scénarios + fuzz 400 parties ; Skyjo :
+- `npm test` : 143/143 (Complots : 30 scénarios + fuzz 400 parties ; Skyjo :
   25 + fuzz 300 ; Incan Gold : 17 + fuzz 400 ; Wavelength : 20 + fuzz 400 ;
-  Traîtres : 19 + fuzz 500 ; avec déconnexions et départs).
+  Traîtres : 19 + fuzz 500 ; 7 Wonders : 26 + fuzz 150 ; avec déconnexions
+  et départs).
 - De bout en bout (3-4 navigateurs) : `public/<jeu>/_banc-essai/partie.py`
-  pour skyjo, incanGold, Wavelength, traitres.
+  pour skyjo, incanGold, Wavelength, traitres, 7wonders.
 - Complots de bout en bout (Playwright, 3 navigateurs) : partie complète,
   F5 → retour à la table, abandon → victoire, revanche.
 - `GET /` et `GET /salle/:code` depuis l'accueil (autre origine) : OK.
+- `GET /donnees/:jeu` (données statiques d'un jeu, ex. cartes de 7 Wonders) : OK.
 
 **Poussé le 2026-09-25** : commit `7803f7b` (Complots), puis Skyjo branché
 (voir le journal pour le commit).
@@ -117,18 +120,19 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 
 ## 5. À faire
 
-- [ ] Migrer 7 Wonders.
+- [ ] 7 Wonders Duel (nouveau jeu à 2 joueurs).
 - [ ] Ajouter l'interface de discussion au client Skyjo (le serveur la gère déjà).
 - [ ] L'utilisateur doit envoyer en SFTP `public/complots/` + `public/_commun/`
       (l'ancien client Complots en ligne ne marche plus avec le serveur poussé),
       et `public/skyjo/`, `public/incanGold/`, `public/Wavelength/`,
-      `public/traitres/` pour les nouveaux clients (les anciens visent encore
-      leurs anciens serveurs).
-- [ ] **Render ne redéploie pas tout seul** (constaté le 2026-09-25 : 3 push
-      après le premier, service resté sur `7803f7b`). Le dépôt s'installe et
-      démarre bien à neuf (`npm ci && node server.js`, vérifié). À faire par
-      l'utilisateur : « Manual Deploy → Deploy latest commit », et activer
-      « Auto-Deploy : On Commit » dans les réglages du service.
+      `public/traitres/`, `public/7wonders/` pour les nouveaux clients (les
+      anciens visent encore leurs anciens serveurs). NB : la synchro SFTP de
+      VS Code est automatique (voir CLAUDE.md) — c'est peut-être déjà fait.
+- [ ] Render a mis longtemps à suivre les push le 2026-09-25 (resté un
+      moment sur `7803f7b`, puis à jour jusqu'à Wavelength). Délai du
+      redéploiement automatique ou déploiement manuel de l'utilisateur :
+      inconnu. Si un push n'apparaît pas sur `GET /`, lui dire « Manual
+      Deploy → Deploy latest commit ».
 
 ## 6. Décisions de l'utilisateur — ne pas défaire
 
@@ -142,6 +146,13 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 ---
 
 ## Journal
+
+### 2026-09-25 — 7 Wonders (édition 2020) migré
+
+- `jeux/7wonders.js`, `jeux/7wonders-catalogue.js` (GÉNÉRÉ par
+  `outils/catalogue-2020.js`), `jeux/7wonders-noms.js`, route générique
+  `GET /donnees/:jeu` (le module d'un jeu peut exporter `donnees`).
+- `outils/` : scripts de génération de données (pas lancés au démarrage).
 
 ### 2026-09-25 — Traîtres à bord migré
 
