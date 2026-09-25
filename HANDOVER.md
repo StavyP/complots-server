@@ -91,7 +91,7 @@ par chaque jeu (identité visuelle propre). Complots n'utilise pas ce kit
 | Skyjo | `/skyjo` | **Fait** le 2026-09-25 : `jeux/skyjo.js` (hérite de `Salle`), tests `skyjo.test.js` + fuzz, client `public/skyjo/` |
 | Incan Gold | `/incan` | **Fait** le 2026-09-25 : `jeux/incan.js`, tests `incan.test.js` + fuzz, client `public/incanGold/` |
 | Wavelength | `/wavelength` | **Fait** le 2026-09-25 : `jeux/wavelength.js` (+ `wavelength-cartes.js`), tests + fuzz, client `public/Wavelength/` |
-| Traîtres à bord | `/traitres` | à refaire |
+| Traîtres à bord | `/traitres` | **Fait** le 2026-09-25 : `jeux/traitres.js`, tests + fuzz, client `public/traitres/` |
 | 7 Wonders | `/7wonders` | à refaire |
 
 Tant qu'un jeu n'est pas dans `jeux/index.js`, son espace n'existe pas ici ;
@@ -100,11 +100,11 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 ## 4. Vérifié / pas vérifié
 
 **Vérifié le 2026-09-25** (local, `PORT=3100 node server.js`) :
-- `npm test` : 96/96 (Complots : 30 scénarios + fuzz 400 parties ; Skyjo :
+- `npm test` : 116/116 (Complots : 30 scénarios + fuzz 400 parties ; Skyjo :
   25 + fuzz 300 ; Incan Gold : 17 + fuzz 400 ; Wavelength : 20 + fuzz 400 ;
-  avec déconnexions et départs).
-- De bout en bout (3-4 navigateurs) : `public/skyjo/_banc-essai/partie.py`,
-  `public/incanGold/_banc-essai/partie.py`, `public/Wavelength/_banc-essai/partie.py`.
+  Traîtres : 19 + fuzz 500 ; avec déconnexions et départs).
+- De bout en bout (3-4 navigateurs) : `public/<jeu>/_banc-essai/partie.py`
+  pour skyjo, incanGold, Wavelength, traitres.
 - Complots de bout en bout (Playwright, 3 navigateurs) : partie complète,
   F5 → retour à la table, abandon → victoire, revanche.
 - `GET /` et `GET /salle/:code` depuis l'accueil (autre origine) : OK.
@@ -117,12 +117,18 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 
 ## 5. À faire
 
-- [ ] Migrer Traîtres, 7 Wonders.
+- [ ] Migrer 7 Wonders.
 - [ ] Ajouter l'interface de discussion au client Skyjo (le serveur la gère déjà).
 - [ ] L'utilisateur doit envoyer en SFTP `public/complots/` + `public/_commun/`
       (l'ancien client Complots en ligne ne marche plus avec le serveur poussé),
-      et `public/skyjo/`, `public/incanGold/`, `public/Wavelength/` pour les
-      nouveaux clients (les anciens visent encore leurs anciens serveurs).
+      et `public/skyjo/`, `public/incanGold/`, `public/Wavelength/`,
+      `public/traitres/` pour les nouveaux clients (les anciens visent encore
+      leurs anciens serveurs).
+- [ ] **Render ne redéploie pas tout seul** (constaté le 2026-09-25 : 3 push
+      après le premier, service resté sur `7803f7b`). Le dépôt s'installe et
+      démarre bien à neuf (`npm ci && node server.js`, vérifié). À faire par
+      l'utilisateur : « Manual Deploy → Deploy latest commit », et activer
+      « Auto-Deploy : On Commit » dans les réglages du service.
 
 ## 6. Décisions de l'utilisateur — ne pas défaire
 
@@ -136,6 +142,10 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 ---
 
 ## Journal
+
+### 2026-09-25 — Traîtres à bord migré
+
+- `jeux/traitres.js` + tests. Render bloqué sur le 1er commit (voir À faire).
 
 ### 2026-09-25 — Wavelength migré
 

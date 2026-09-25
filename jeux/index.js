@@ -5,4 +5,5 @@ module.exports = [
   require('./skyjo'),
   require('./incan'),
   require('./wavelength'),
+  require('./traitres'),
 ];
