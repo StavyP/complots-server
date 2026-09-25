@@ -14,22 +14,28 @@
 |---|---|
 | Rôle | **Un seul** serveur Node (Express + Socket.IO) pour tous les jeux en ligne. Chaque jeu = un espace Socket.IO : `/complots`, `/skyjo`, `/incan`, `/wavelength`, `/traitres`, `/7wonders` |
 | Hébergement | **Render**, `https://complots-server.onrender.com` (nom historique gardé : les clients déjà en ligne le connaissent) |
-| Mise en ligne | Render est relié au dépôt GitHub **`https://github.com/StavyP/complots-server.git`**. L'utilisateur y dépose les fichiers **par l'interface web de GitHub** ; Render redéploie seul ; démarrage `node server.js`, port via `PORT` |
+| Mise en ligne | Render est relié au dépôt GitHub **`https://github.com/StavyP/complots-server.git`** (branche `main`) ; tout push redéploie seul ; démarrage `node server.js`, port via `PORT` |
 | Clients | Pages statiques sur IONOS (`public/<jeu>/`). L'URL du serveur est dans **`public/_commun/config.js`** (une ligne pour tous) |
 | Sauvegarde d'avant fusion | `_backups/jeux-2026-09-24-avant-fusion/` : anciens `server.js` de chaque jeu (7wonders, incanGold, skyjo, traitres, Wavelength, complots) et ancien `server/jeux/` |
 
-### ⚠️ Ne jamais pousser sur le dépôt GitHub depuis une session
+### Pousser après chaque mise à jour (consigne de l'utilisateur, 2026-09-25)
 
-Pousser = Render redéploie = les clients déjà en ligne (qui parlent l'ancien
-protocole) cassent. L'utilisateur envoie serveur et clients **ensemble**.
-Aucune session n'a les droits de toute façon ; ne pas chercher à les obtenir.
+« Push le serveur mis à jour sur GitHub à chaque fois pour que je puisse voir
+le rendu. » Procédure (l'espace n'est pas un dépôt git, on passe par un clone) :
 
-### Fichiers à envoyer sur GitHub
+1. `git clone https://github.com/StavyP/complots-server.git` dans le scratchpad.
+2. Y copier `server.js`, `package.json`, `package-lock.json`, `.gitignore`,
+   `HANDOVER.md`, `lib/`, `jeux/`, `tests/` — **jamais `node_modules/`**.
+   (Le dossier `image/` du dépôt est un reste de l'ancien Complots : inutile, laissé.)
+3. `npm test` dans `server/` avant de committer ; commit ; `git push origin main`
+   (Git Credential Manager a déjà les droits).
+4. Dire à l'utilisateur quels dossiers de `public/` envoyer en SFTP : un jeu
+   migré ne marche en ligne qu'avec son nouveau client **et** `public/_commun/`.
 
-`server.js`, `package.json`, `package-lock.json`, `.gitignore`, `lib/`,
-`jeux/`, `tests/` (facultatif). **Jamais `node_modules/`** (Render fait
-`npm install`). Supprimer du dépôt les anciens fichiers qui n'existent plus
-ici (ancien `server.js` monolithique de Complots, etc.).
+Effet d'un push sur les jeux en ligne : les anciens clients des jeux non
+migrés visent encore leurs anciens serveurs Render (`skijo-server`,
+`incan-server`, `saboteur-server`…) et ne sont pas touchés. Seul l'ancien
+client Complots (même adresse) ne marche plus tant que le nouveau n'est pas envoyé.
 
 ## 2. Architecture
 
@@ -82,32 +88,37 @@ par chaque jeu (identité visuelle propre). Complots n'utilise pas ce kit
 | Jeu | Espace | État |
 |---|---|---|
 | Complots | `/complots` | **Fait** (moteur refondu le 2026-09-24, migré ici le 2026-09-25) |
-| Skyjo | `/skyjo` | à refaire (règles, moteur, client) |
+| Skyjo | `/skyjo` | **Fait** le 2026-09-25 : `jeux/skyjo.js` (hérite de `Salle`), tests `skyjo.test.js` + fuzz, client `public/skyjo/` |
 | Incan Gold | `/incan` | à refaire |
 | Wavelength | `/wavelength` | à refaire |
 | Traîtres à bord | `/traitres` | à refaire |
 | 7 Wonders | `/7wonders` | à refaire |
 
-Tant qu'un jeu n'est pas dans `jeux/index.js`, **son espace n'existe pas** :
-son ancien client (qui vise l'ancien serveur) ne marche pas avec ce serveur.
-→ Ne déployer ce serveur qu'une fois tous les jeux migrés, ou accepter
-que les jeux non migrés soient hors service entre-temps.
+Tant qu'un jeu n'est pas dans `jeux/index.js`, son espace n'existe pas ici ;
+son ancien client continue de viser son ancien serveur Render (voir §1).
 
 ## 4. Vérifié / pas vérifié
 
 **Vérifié le 2026-09-25** (local, `PORT=3100 node server.js`) :
-- `npm test` : 31/31 (Complots : 30 scénarios + fuzz 400 parties).
+- `npm test` : 57/57 (Complots : 30 scénarios + fuzz 400 parties ; Skyjo :
+  25 scénarios + fuzz 300 parties avec déconnexions et départs).
+- Skyjo de bout en bout : `public/skyjo/_banc-essai/partie.py` (3 navigateurs).
 - Complots de bout en bout (Playwright, 3 navigateurs) : partie complète,
   F5 → retour à la table, abandon → victoire, revanche.
 - `GET /` et `GET /salle/:code` depuis l'accueil (autre origine) : OK.
 
-**Pas vérifié** : sur Render ; `npm install` sur Render (Node ≥ 18 exigé par
-`engines`) ; tenue en charge.
+**Poussé le 2026-09-25** : commit `7803f7b` (Complots), puis Skyjo branché
+(voir le journal pour le commit).
+
+**Pas vérifié** : le redéploiement Render après ce push (à contrôler :
+`GET https://complots-server.onrender.com/` doit lister les jeux) ; tenue en charge.
 
 ## 5. À faire
 
-- [ ] Migrer Skyjo, Incan Gold, Wavelength, Traîtres, 7 Wonders.
-- [ ] Déploiement coordonné (GitHub + IONOS) quand tout est prêt.
+- [ ] Migrer Incan Gold, Wavelength, Traîtres, 7 Wonders.
+- [ ] L'utilisateur doit envoyer en SFTP `public/complots/` + `public/_commun/`
+      (l'ancien client Complots en ligne ne marche plus avec le serveur poussé),
+      et `public/skyjo/` pour le nouveau Skyjo (l'ancien vise encore `skijo-server`).
 
 ## 6. Décisions de l'utilisateur — ne pas défaire
 
@@ -115,14 +126,20 @@ que les jeux non migrés soient hors service entre-temps.
 |---|---|
 | Fusionner les serveurs de 7wonders, complots, skyjo, incangold, traitres, wavelength en un seul | Demande du 2026-09-24 |
 | Render déployé depuis le dépôt GitHub relié `StavyP/complots-server` | Réponse de l'utilisateur, 2026-09-24 |
+| **Pousser le serveur sur GitHub après chaque mise à jour**, tout sur **un seul serveur** | Demandes du 2026-09-25 |
 | Chaque jeu garde **sa propre identité visuelle** (celle de sa boîte) ; seul l'accueil est cel-shaded | Réponse de l'utilisateur, 2026-09-24 |
 
 ---
 
 ## Journal
 
+### 2026-09-25 — Skyjo migré
+
+- `jeux/skyjo.js` + tests ; `tests/aide.js` (fausse horloge commune aux
+  nouveaux tests). Voir `public/skyjo/HANDOVER.md` pour les règles.
+
 ### 2026-09-25 — Création
 
 - Serveur unique écrit (`lib/`, `jeux/index.js`), Complots migré et testé.
 - Anciens serveurs sauvegardés dans `_backups/jeux-2026-09-24-avant-fusion/`.
-- **Rien n'est déployé.**
+- Premier push sur GitHub (`7803f7b`), à la demande de l'utilisateur.

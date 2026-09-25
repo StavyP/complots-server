@@ -85,8 +85,9 @@ class SkyjoRoom extends Salle {
     g.round++;
     g.deck = nouveauPaquet();
     g.discard = [];
-    for (const s of this.liveSeats()) {
-      s.grid = Array.from({ length: 12 }, () => ({ v: g.deck.pop(), up: false, gone: false }));
+    for (const s of g.seats) {
+      // Un joueur parti ne reçoit plus de cartes.
+      s.grid = this.player(s.id)?.left ? [] : Array.from({ length: 12 }, () => ({ v: g.deck.pop(), up: false, gone: false }));
       s.revealed = 0;
     }
     g.discard.push(g.deck.pop());
@@ -436,7 +437,7 @@ class SkyjoRoom extends Salle {
       return;
     }
     if (g.step === 'roundEnd') return this.maybeNextRound();
-    if (g.closer === pid) g.closer = g.closer; // la manche reste terminée par lui/elle
+    // S'il avait fermé la manche, elle reste fermée : les autres finissent leur dernier tour.
     if (g.cur === pid) {
       if (g.held !== null) g.discard.push(g.held);
       this.nextTurn();
