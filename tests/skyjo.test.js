@@ -287,7 +287,7 @@ test('colonnes identiques révélées au décompte : retirées aussi', () => {
   assert.equal(g.result.find((r) => r.id === 'p1').raw, 23);
 });
 
-test('manche suivante : tous prêts → nouvelle manche, le fermeur commence', () => {
+test('manche suivante : tous prêts → nouvelle manche, le plus gros total commence (pas le fermeur)', () => {
   const { room, g } = setup({ n: 3 });
   reveal(room);
   finirManche(room, 'p2', [9, 8, 1]);
@@ -298,10 +298,9 @@ test('manche suivante : tous prêts → nouvelle manche, le fermeur commence', (
   assert.equal(g.round, 2);
   assert.equal(g.step, 'reveal');
   assert.equal(cartes(room), 150);
-  g.seats[0].grid[0].v = 12;
-  g.seats[0].grid[1].v = 12;
+  g.seats.forEach((s, k) => { s.grid[0].v = k === 0 ? 12 : -2; s.grid[1].v = k === 0 ? 12 : -2; });
   reveal(room);
-  assert.equal(g.cur, 'p2', 'le fermeur, même avec un plus petit total');
+  assert.equal(g.cur, 'p0', '12 + 12 = 24 : le plus gros total, bien que p2 ait fermé');
 });
 
 test('manche suivante : un joueur déconnecté n’est pas attendu ; l’hôte peut forcer', () => {

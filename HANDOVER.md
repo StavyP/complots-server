@@ -138,6 +138,12 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
       liste les 7 jeux. Simple délai, pas une panne (un clone neuf + `npm ci`
       démarrait déjà bien). Avant d'accuser le code, attendre ou « Manual Deploy ».
 
+- [ ] Échec intermittent de `npm test` vu **une fois** le 2026-09-26 (après la
+      correction du fuzz Duel), jamais reproduit en 220+ passages. Si un
+      `npm test` échoue sans modification, garder la sortie complète (le
+      `not ok` et son `error:`) avant de relancer : c'est très probablement
+      un autre fuzz qui exige un événement rare.
+
 ## 6. Décisions de l'utilisateur — ne pas défaire
 
 | Décision | Contexte |
@@ -150,6 +156,24 @@ son ancien client continue de viser son ancien serveur Render (voir §1).
 ---
 
 ## Journal
+
+### 2026-09-26 — Skyjo : qui commence ; test Duel instable
+
+- Skyjo (`jeux/skyjo.js`, `beginTurns`) : le plus gros total des 2 cartes
+  retournées commence **à chaque manche** (demande de l'utilisateur ; la
+  règle officielle donnait la main au fermeur dès la 2e manche). Détails :
+  `public/skyjo/HANDOVER.md`.
+- `tests/duel-fuzz.test.js` échouait parfois : il exigeait qu'au moins une
+  des 300 parties aléatoires finisse en suprématie scientifique, ce que le
+  hasard ne garantit pas (vu : `{"civile":249,"militaire":23,…}`). Il n'exige
+  plus que les fins civile et militaire ; la science reste couverte par
+  `duel.test.js` (« science : … 6 symboles différents = victoire »).
+- Après la correction, **un** autre échec isolé est apparu une fois, non
+  capturé (sortie filtrée). Ensuite : 60 passages des fuzz seuls, 60 des
+  tests hors fuzz et plus de 100 passages complets de `npm test`, tous verts.
+  Cause inconnue — voir « À faire ».
+- Poussé sur GitHub (commit « Skyjo : le plus gros total commence chaque
+  manche »).
 
 ### 2026-09-25 — 7 Wonders Duel ajouté
 

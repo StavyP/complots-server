@@ -92,6 +92,8 @@ test(`${PARTIES} parties aléatoires`, () => {
     assert.equal(new Set(toutes).size, toutes.length, 'carte en double');
     assert.ok(toutes.every((id) => CARTE[id]));
   }
-  // Les trois fins par suprématie/points doivent toutes apparaître.
-  assert.ok(raisons.civile && raisons.militaire && raisons.science, JSON.stringify(raisons));
+  // Fins courantes : elles doivent apparaître. La suprématie scientifique est
+  // trop rare au hasard (certaines séries de 300 n'en ont aucune, d'où un test
+  // instable) : elle est couverte par un test déterministe de duel.test.js.
+  assert.ok(raisons.civile && raisons.militaire, JSON.stringify(raisons));
 });

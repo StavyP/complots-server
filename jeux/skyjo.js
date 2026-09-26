@@ -5,8 +5,10 @@
 // regles.com, lues le 2026-09-25.
 //   - 150 cartes : 5 × −2, 10 × −1, 15 × 0, 10 × chaque valeur de 1 à 12.
 //   - 12 cartes face cachée par joueur (4 colonnes de 3), 2 retournées.
-//   - 1re manche : le plus gros total des 2 cartes commence ; ensuite, celui
-//     qui a terminé la manche précédente.
+//   - Chaque manche : le plus gros total des 2 cartes retournées commence.
+//     La règle officielle donne, après la 1re manche, la main à celui qui a
+//     terminé la précédente ; choix de l'utilisateur (2026-09-26) : le plus
+//     gros total à chaque manche.
 //   - Tour : prendre la défausse (et l'échanger aussitôt), OU piocher, puis
 //     échanger la carte OU la défausser et retourner une carte cachée.
 //   - Colonne de 3 cartes identiques visibles : retirée, sur la défausse
@@ -63,7 +65,6 @@ class SkyjoRoom extends Salle {
       heldFrom: null,
       closer: null,
       lastTurns: [],
-      prevCloser: null,
       result: null,
       ready: [],
       auto: false,
@@ -123,16 +124,12 @@ class SkyjoRoom extends Salle {
   beginTurns() {
     const g = this.g;
     const live = this.liveSeats();
-    let first = g.round > 1 && live.find((s) => s.id === g.prevCloser);
-    if (first) {
-      this.addLog(`${this.nameOf(first.id)} a fini la manche précédente : à lui/elle de commencer.`);
-    } else {
-      const sum = (s) => s.grid.reduce((t, c) => t + (c.up && !c.gone ? c.v : 0), 0);
-      const best = Math.max(...live.map(sum));
-      const tied = live.filter((s) => sum(s) === best);
-      first = tied[Math.floor(Math.random() * tied.length)];
-      this.addLog(`${this.nameOf(first.id)} a le plus gros total (${best})${tied.length > 1 ? ', tiré au sort parmi les ex æquo' : ''} : il/elle commence.`);
-    }
+    // Le plus gros total des 2 cartes retournées commence, à chaque manche.
+    const sum = (s) => s.grid.reduce((t, c) => t + (c.up && !c.gone ? c.v : 0), 0);
+    const best = Math.max(...live.map(sum));
+    const tied = live.filter((s) => sum(s) === best);
+    const first = tied[Math.floor(Math.random() * tied.length)];
+    this.addLog(`${this.nameOf(first.id)} a le plus gros total (${best})${tied.length > 1 ? ', tiré au sort parmi les ex æquo' : ''} : il/elle commence.`);
     g.cur = first.id;
     g.step = 'choose';
     this.addFx('turn', { pid: g.cur });
@@ -312,7 +309,6 @@ class SkyjoRoom extends Salle {
         ? `${this.nameOf(g.closer)} n'a pas le plus petit score : ses ${closerRaw} points sont doublés !`
         : `${this.nameOf(g.closer)} a fermé la manche avec le plus petit score. Bien joué !`, doubled ? 'bad' : 'good');
     }
-    g.prevCloser = g.closer;
     this.addFx('round', { round: g.round, doubled });
     const fini = live.some((s) => s.total >= this.settings.cible);
     if (fini) {
